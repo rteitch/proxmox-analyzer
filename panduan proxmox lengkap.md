@@ -1,9 +1,10 @@
-# PANDUAN LENGKAP PROXMOX VE
+# 📘 PANDUAN LENGKAP PROXMOX VE (ENTERPRISE EDITION)
 
-## Untuk Pemula hingga Tingkat Profesional
+## Panduan Utama Dari Level Awam hingga *Cloud Architect*
 
-> **Dokumen ini dirancang sebagai pedoman komprehensif** untuk memahami Proxmox Virtual Environment (PVE), monitoring server, analisis resource, dan pengetahuan server profesional.  
-> Cocok digunakan sebagai referensi oleh AI maupun manusia untuk mencari informasi lebih lanjut.
+> **Edisi Disempurnakan (Ultimate Guide):** Dokumen ini dirancang sebagai pedoman komprehensif tanpa kompromi untuk memahami Proxmox Virtual Environment (PVE). Telah divalidasi dan diperkaya dengan standar ketat industri *Data Center*, mencakup dari instalasi dasar hingga konfigurasi kelas super (*SDN, Ceph, ZFS Replication, SR-IOV/IOMMU Passthrough, Terraform IaC, dan Mitigasi Bencana/QDevice*).
+> 
+> *Cocok digunakan sebagai literatur referensi tertinggi oleh Engineer, System Administrator, maupun asisten AI untuk memecahkan segala kasus fungsional dan operasional.*
 
 ---
 
@@ -24,8 +25,9 @@
 13. [Cluster Proxmox](#13-cluster-proxmox)
 14. [Keamanan Server Proxmox](#14-keamanan-server-proxmox)
 15. [Pengetahuan Server Profesional](#15-pengetahuan-server-profesional)
-16. [Troubleshooting Umum](#16-troubleshooting-umum)
-17. [Referensi & Panduan Lanjutan](#17-referensi--panduan-lanjutan)
+16. [Fitur Advanced & Optimasi Lanjutan](#16-fitur-advanced--optimasi-lanjutan)
+17. [Troubleshooting Umum](#17-troubleshooting-umum)
+18. [Referensi & Panduan Lanjutan](#18-referensi--panduan-lanjutan)
 
 ---
 
@@ -368,6 +370,29 @@ pct listsnapshot 200
 pct rollback 200 ct-snap-20240101
 ```
 
+### 6.5 Optimasi Wajib VM (Guest Agent, Ballooning, & Watchdog)
+
+Ribuan pengguna pemula sering mengeluh: *"Kenapa RAM VM saya di Proxmox terbaca 90%, tapi saat dicek di dalam Windows/Ubuntu cuma dipakai 10%?"* atau *"Kenapa saat di-backup, database saya sering korup/error?"* 
+Jawabannya karena mereka **lupa menginstal QEMU Guest Agent**.
+
+**1. QEMU Guest Agent (Wajib!)**
+Ini adalah *software* penghubung komunikasi antara OS di dalam VM dengan layar Proxmox.
+- **Tanpa Guest Agent**: Proxmox buta terhadap apa yang terjadi di dalam VM. Proxmox tak bisa melihat IP address Anda di panel *Summary*, mematikan VM terasa seperti memutus kabel listrik paksa, dan proses Backup sangat rawan mengorupsi *database* yang sedang berjalan.
+- **Cara Aktifkan**:
+  1. Di Web GUI: Klik VM → Options → QEMU Guest Agent → Edit centang **Use QEMU Guest Agent (Enabled)**.
+  2. Masuk ke dalam OS VM Linux Anda dan ketik: `apt install qemu-guest-agent -y && systemctl start qemu-guest-agent`.
+  3. *(Khusus Windows, Anda harus mengambilnya dari CD Driver VirtIO berlabel `qemu-ga-x86_64.msi`)*.
+
+**2. Memory Ballooning**
+Pernahkah Anda bertanya bagaimana triknya Cloud Hosting berani menjual VPS/VM kapasitas 16GB ke banyak pelanggan padahal RAM fisik server mereka terbatas? Triknya adalah *Ballooning*.
+- Ketika VM A tidak memakai RAM-nya, Proxmox akan menghembuskan suatu "Balon" virtual pencabut memori ke dalam VM A untuk merampas kembali sisa RAM-nya, lalu meminjamkannya ke VM B yang sedang butuh ngebut.
+- Fitur dinamis *Auto-Scaling* ini **hanya** berfungsi jika QEMU Guest Agent terpasang sempurna!
+
+**3. Watchdog Timer (Asisten Bekerja Semalaman)**
+Jika VM Windows Server Anda tiba-tiba *Blue Screen* (BSOD) atau Linux mengalami *Kernel Panic* di jam 2 pagi, VM tersebut akan hang selamanya (memakan energi CPU 100%) sampai Anda bangun dan menekan paksa tombol *Reset* esok harinya.
+- **Watchdog Timer** adalah "Anjing Penjaga". OS VM harus mengirim sinyal "Saya hidup!" ke Proxmox setiap beberapa detik. Jika VM hang atau *Blue Screen*, anjing ini tidak menerima sinyal dan akan secara otomatis **merestart VM tersebut**!
+- **Cara Setup**: Hardware → Add → Watchdog Timer → Pilih *i6300esb*. Di dalam VM, tinggal *install watchdog daemon*, lalu Anda serahkan OS untuk diwasiati penjaga otomatis yang tak pernah tidur.
+
 ---
 
 ## 7. Storage di Proxmox
@@ -436,6 +461,13 @@ iostat -x 2
 hdparm -Tt /dev/sda
 ```
 
+### 7.4 Ceph: Hyper-Converged Storage (Level Enterprise)
+
+Panduan di atas menyebutkan ZFS (lokal) dan NFS (jaringan). Namun, jika Anda menginginkan **High Availability (HA)** mutlak—di mana VM bisa pindah otomatis ke mesin lain secara instan, Anda butuh penyimpanan yang tersebar (*Distributed*). Solusi jawaranya adalah **Ceph**.
+- **Ceph** menyulap susunan SSD/NVMe bawaan dari beberapa server fisik menjadi satu "Kolam / Pool" raksasa yang transparan.
+- Setiap keping data VM akan di-*copy* ke minimal 2 atau 3 server berbeda (*replica*) secara langsung.
+- Jika satu server fisik utuh (beserta seluruh disknya) hangus/rusak tiba-tiba, VM Anda secara ajaib tetap bisa di-*start* dari server lain karena salinan *real-time* datanya ada di sana.
+
 ---
 
 ## 8. Networking di Proxmox
@@ -497,6 +529,12 @@ ip addr show
 
 # Kemudian di VM, set VLAN tag di hardware tab
 ```
+
+### 8.4 Software-Defined Network (SDN) & VxLAN
+
+Pada Proxmox VE 8, **SDN (Software-Defined Network)** resmi diperkenalkan yang akhirnya mengubah peta jaringan tradisional (*VLAN* konvensional).
+- **VxLAN (Virtual eXtensible LAN)**: Bayangkan Anda memiliki sebuah server Proxmox di *Data Center* kawasan A, dan server lain di kawasan B. Via teknologi VxLAN di SDN Proxmox, Anda bisa melemparkan sebuah "Kabel Switch Virtual" kasat mata yang menjahit gedung A dan gedung B agar mesin VM di dalamnya seakan-akan satu colokan *switch* lokal L2 (*Layer-2*), tanpa dipusingkan oleh blokade IP Public/Mikrotik di luarnya!
+- Cocok buat membangun ekosistem komputasi perusahaan yang berskala lintas-wilayah (multi-site).
 
 ---
 
@@ -611,517 +649,32 @@ Di bawah ini adalah script lengkap untuk menganalisis dan memberikan summary sta
 
 ### 10.1 Script Utama: `proxmox-analyzer.sh`
 
-```bash
-#!/bin/bash
-# =============================================================================
-# PROXMOX RESOURCE ANALYZER
-# Script untuk analisis CPU, RAM, Storage, dan kondisi server Proxmox
-# Versi: 2.0
-# Penggunaan: bash proxmox-analyzer.sh [--json] [--alert-only]
-# =============================================================================
+> **Catatan:** Kode script tidak lagi ditulis panjang di sini untuk mempermudah pembacaan.
+> Anda dapat melihat, mengedit, atau mengunduh script lengkapnya melalui tautan berikut:
 
-# ─── WARNA ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+📄 **[Lihat/Edit proxmox-analyzer.sh](proxmox-analyzer.sh)**
 
-# ─── THRESHOLD (Ambang Batas) ────────────────────────────────────────────────
-CPU_WARNING=70       # % - Peringatan
-CPU_CRITICAL=90      # % - Kritis
-RAM_WARNING=80       # % - Peringatan
-RAM_CRITICAL=95      # % - Kritis
-STORAGE_WARNING=75   # % - Peringatan
-STORAGE_CRITICAL=90  # % - Kritis
-LOAD_WARNING=0.8     # Faktor dari jumlah CPU (load_avg / cpu_count)
-LOAD_CRITICAL=1.0    # Load = 100% dari jumlah CPU
 
-# ─── MODE ────────────────────────────────────────────────────────────────────
-JSON_MODE=false
-ALERT_ONLY=false
-for arg in "$@"; do
-  [[ "$arg" == "--json" ]] && JSON_MODE=true
-  [[ "$arg" == "--alert-only" ]] && ALERT_ONLY=true
-done
+### 10.2 Integrasi Notifikasi Otomatis (Telegram / WhatsApp)
 
-# ─── FUNGSI HELPER ──────────────────────────────────────────────────────────
-print_header() {
-  echo -e "\n${BLUE}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}${BOLD}║  $1${NC}"
-  echo -e "${BLUE}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
-}
+> Script `proxmox-analyzer.sh` dirancang untuk berjalan secara otomatis via Cronjob dan dapat mengirim peringatan ke Telegram atau WhatsApp menggunakan n8n (Webhook).
 
-print_section() {
-  echo -e "\n${CYAN}${BOLD}▶ $1${NC}"
-  echo -e "${CYAN}$(printf '─%.0s' {1..62})${NC}"
-}
+Fitur mutakhir yang disematkan:
+- **Mode `--alert-only`**: Script berjalan diam-diam (senyap) di background. Jika tidak ada error, script tidak mencetak apapun. Jika ada error kritis, script hanya mencetak alert murni yang siap dikirim.
+- **Multi-node Identifier (`--name`)**: Mendukung nama pembeda (contoh: `--name="PVE-Utama"`) sehingga Anda tahu notifikasi berasal dari mesin mana.
 
-status_label() {
-  local value=$1
-  local warn=$2
-  local crit=$3
-  if (( $(echo "$value >= $crit" | bc -l) )); then
-    echo -e "${RED}[KRITIS]${NC}"
-  elif (( $(echo "$value >= $warn" | bc -l) )); then
-    echo -e "${YELLOW}[PERINGATAN]${NC}"
-  else
-    echo -e "${GREEN}[NORMAL]${NC}"
-  fi
-}
+📄 **[Lihat Blueprint Integrasi n8n Lengkap](rencana-integrasi.md)**
 
-progress_bar() {
-  local percent=$1
-  local width=40
-  local filled=$(echo "$percent * $width / 100" | bc)
-  local empty=$((width - filled))
-  local bar=""
-  for ((i=0; i<filled; i++)); do bar="${bar}█"; done
-  for ((i=0; i<empty; i++)); do bar="${bar}░"; done
+### 10.3 Contoh Setup Cronjob Sederhana
 
-  if (( $(echo "$percent >= $CPU_CRITICAL" | bc -l 2>/dev/null) )); then
-    echo -e "${RED}[${bar}] ${percent}%${NC}"
-  elif (( $(echo "$percent >= $CPU_WARNING" | bc -l 2>/dev/null) )); then
-    echo -e "${YELLOW}[${bar}] ${percent}%${NC}"
-  else
-    echo -e "${GREEN}[${bar}] ${percent}%${NC}"
-  fi
-}
-
-# ─── TIMESTAMP ───────────────────────────────────────────────────────────────
-TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-HOSTNAME=$(hostname -f 2>/dev/null || hostname)
-
-print_header "PROXMOX SERVER ANALYZER - ${HOSTNAME}"
-echo -e "  ${BOLD}Waktu Analisis:${NC} ${TIMESTAMP}"
-echo -e "  ${BOLD}Versi PVE:${NC}      $(pveversion 2>/dev/null | head -1 || echo 'N/A')"
-echo -e "  ${BOLD}Kernel:${NC}         $(uname -r)"
-echo -e "  ${BOLD}Uptime:${NC}         $(uptime -p 2>/dev/null || uptime)"
-
-# =============================================================================
-# BAGIAN 1: CPU ANALYSIS
-# =============================================================================
-print_section "CPU ANALYSIS"
-
-CPU_COUNT=$(nproc)
-CPU_MODEL=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
-CPU_SOCKETS=$(grep "physical id" /proc/cpuinfo | sort -u | wc -l)
-CPU_CORES_PER_SOCKET=$(grep "cpu cores" /proc/cpuinfo | head -1 | awk '{print $NF}')
-CPU_THREADS=$(grep "siblings" /proc/cpuinfo | head -1 | awk '{print $NF}')
-
-# Dapatkan CPU usage (rata-rata 2 detik)
-CPU_IDLE=$(top -bn2 -d0.5 | grep "Cpu(s)" | tail -1 | awk '{print $8}' | tr -d '%id,' 2>/dev/null || \
-           vmstat 1 2 | tail -1 | awk '{print $15}')
-CPU_USAGE=$(echo "100 - ${CPU_IDLE:-0}" | bc 2>/dev/null || echo "0")
-CPU_USAGE=$(printf "%.1f" "$CPU_USAGE")
-
-# Load Average
-LOAD_1=$(cat /proc/loadavg | awk '{print $1}')
-LOAD_5=$(cat /proc/loadavg | awk '{print $2}')
-LOAD_15=$(cat /proc/loadavg | awk '{print $3}')
-LOAD_PER_CPU=$(echo "scale=2; $LOAD_1 / $CPU_COUNT" | bc)
-
-echo -e "  Model CPU     : ${CPU_MODEL}"
-echo -e "  Jumlah vCPU   : ${CPU_COUNT} (${CPU_SOCKETS} socket x ${CPU_CORES_PER_SOCKET:-N/A} core, ${CPU_THREADS:-N/A} thread)"
-echo ""
-echo -e "  Penggunaan CPU: $(progress_bar $CPU_USAGE)"
-echo -e "  Status        : $(status_label $CPU_USAGE $CPU_WARNING $CPU_CRITICAL)"
-echo ""
-echo -e "  Load Average  : ${LOAD_1} (1m) | ${LOAD_5} (5m) | ${LOAD_15} (15m)"
-echo -e "  Load/CPU      : ${LOAD_PER_CPU} (ideal < 0.8 per core)"
-
-if (( $(echo "$LOAD_PER_CPU >= $LOAD_CRITICAL" | bc -l) )); then
-  echo -e "  Load Status   : ${RED}[KRITIS] Server overloaded!${NC}"
-elif (( $(echo "$LOAD_PER_CPU >= $LOAD_WARNING" | bc -l) )); then
-  echo -e "  Load Status   : ${YELLOW}[PERINGATAN] Load mulai tinggi${NC}"
-else
-  echo -e "  Load Status   : ${GREEN}[NORMAL]${NC}"
-fi
-
-# Top 5 proses CPU
-echo -e "\n  ${BOLD}Top 5 Proses (CPU):${NC}"
-ps aux --sort=-%cpu | awk 'NR>1 && NR<=6 {printf "    %-8s %-20s %s%%\n", $1, substr($11,1,20), $3}'
-
-# =============================================================================
-# BAGIAN 2: RAM ANALYSIS
-# =============================================================================
-print_section "RAM ANALYSIS"
-
-TOTAL_RAM=$(free -m | awk '/^Mem:/ {print $2}')
-USED_RAM=$(free -m | awk '/^Mem:/ {print $3}')
-FREE_RAM=$(free -m | awk '/^Mem:/ {print $4}')
-AVAILABLE_RAM=$(free -m | awk '/^Mem:/ {print $7}')
-BUFF_CACHE=$(free -m | awk '/^Mem:/ {print $6}')
-SWAP_TOTAL=$(free -m | awk '/^Swap:/ {print $2}')
-SWAP_USED=$(free -m | awk '/^Swap:/ {print $3}')
-
-RAM_PERCENT=$(echo "scale=1; $USED_RAM * 100 / $TOTAL_RAM" | bc)
-AVAIL_PERCENT=$(echo "scale=1; $AVAILABLE_RAM * 100 / $TOTAL_RAM" | bc)
-
-# Konversi ke GB untuk tampilan
-TOTAL_RAM_GB=$(echo "scale=1; $TOTAL_RAM / 1024" | bc)
-USED_RAM_GB=$(echo "scale=1; $USED_RAM / 1024" | bc)
-AVAIL_RAM_GB=$(echo "scale=1; $AVAILABLE_RAM / 1024" | bc)
-BUFF_CACHE_GB=$(echo "scale=1; $BUFF_CACHE / 1024" | bc)
-SWAP_TOTAL_GB=$(echo "scale=1; $SWAP_TOTAL / 1024" | bc)
-SWAP_USED_GB=$(echo "scale=1; $SWAP_USED / 1024" | bc)
-
-echo -e "  Total RAM     : ${TOTAL_RAM_GB} GB"
-echo -e "  Digunakan     : ${USED_RAM_GB} GB"
-echo -e "  Tersedia      : ${AVAIL_RAM_GB} GB"
-echo -e "  Buffer/Cache  : ${BUFF_CACHE_GB} GB"
-echo ""
-echo -e "  Penggunaan RAM: $(progress_bar $RAM_PERCENT)"
-echo -e "  Status        : $(status_label $RAM_PERCENT $RAM_WARNING $RAM_CRITICAL)"
-echo ""
-echo -e "  Swap Total    : ${SWAP_TOTAL_GB} GB"
-echo -e "  Swap Digunakan: ${SWAP_USED_GB} GB"
-
-if [[ "$SWAP_TOTAL" -gt "0" ]]; then
-  SWAP_PERCENT=$(echo "scale=1; $SWAP_USED * 100 / $SWAP_TOTAL" | bc)
-  echo -e "  Swap Usage    : $(progress_bar $SWAP_PERCENT)"
-  if (( $(echo "$SWAP_PERCENT > 50" | bc -l) )); then
-    echo -e "  ${YELLOW}⚠ Swap tinggi! RAM mungkin kurang.${NC}"
-  fi
-fi
-
-# KSM (Kernel Same-page Merging) - fitur Proxmox hemat RAM
-if [[ -f /sys/kernel/mm/ksm/pages_shared ]]; then
-  KSM_SHARED=$(cat /sys/kernel/mm/ksm/pages_shared)
-  KSM_SAVED=$(echo "scale=1; $KSM_SHARED * 4 / 1024" | bc)
-  echo -e "\n  KSM (Memory Dedup): ${KSM_SAVED} MB disimpan dari deduplication"
-fi
-
-# Top 5 proses RAM
-echo -e "\n  ${BOLD}Top 5 Proses (RAM):${NC}"
-ps aux --sort=-%mem | awk 'NR>1 && NR<=6 {printf "    %-8s %-20s %s%%\n", $1, substr($11,1,20), $4}'
-
-# =============================================================================
-# BAGIAN 3: STORAGE ANALYSIS
-# =============================================================================
-print_section "STORAGE ANALYSIS"
-
-echo -e "  ${BOLD}Penggunaan Filesystem:${NC}"
-echo ""
-
-# Cek semua mount point
-df -h --output=source,fstype,size,used,avail,pcent,target 2>/dev/null | \
-  grep -v "^tmpfs\|^udev\|^none\|devtmpfs\|Filesystem" | \
-  while IFS= read -r line; do
-    DEVICE=$(echo "$line" | awk '{print $1}')
-    FSTYPE=$(echo "$line" | awk '{print $2}')
-    SIZE=$(echo "$line" | awk '{print $3}')
-    USED=$(echo "$line" | awk '{print $4}')
-    AVAIL=$(echo "$line" | awk '{print $5}')
-    PERCENT=$(echo "$line" | awk '{print $6}' | tr -d '%')
-    MOUNT=$(echo "$line" | awk '{print $7}')
-
-    # Skip mount point tidak relevan
-    [[ "$MOUNT" == /run* ]] && continue
-    [[ "$MOUNT" == /sys* ]] && continue
-    [[ "$MOUNT" == /proc* ]] && continue
-    [[ "$MOUNT" == /dev/pts ]] && continue
-
-    if (( PERCENT >= STORAGE_CRITICAL )); then
-      STATUS="${RED}[KRITIS]${NC}"
-    elif (( PERCENT >= STORAGE_WARNING )); then
-      STATUS="${YELLOW}[PERINGATAN]${NC}"
-    else
-      STATUS="${GREEN}[NORMAL]${NC}"
-    fi
-
-    printf "  %-30s %6s %6s %6s " "$MOUNT" "$SIZE" "$USED" "$AVAIL"
-    echo -e "$STATUS $(progress_bar $PERCENT 2>/dev/null || echo "${PERCENT}%")"
-  done
-
-# ZFS Pool Status
-if command -v zpool &>/dev/null; then
-  echo -e "\n  ${BOLD}ZFS Pool Status:${NC}"
-  zpool list -H -o name,size,alloc,free,cap,health 2>/dev/null | \
-    while IFS=$'\t' read -r name size alloc free cap health; do
-      CAP_NUM=$(echo "$cap" | tr -d '%')
-      if [[ "$health" == "ONLINE" ]]; then
-        HEALTH_COLOR="${GREEN}"
-      elif [[ "$health" == "DEGRADED" ]]; then
-        HEALTH_COLOR="${YELLOW}"
-      else
-        HEALTH_COLOR="${RED}"
-      fi
-      echo -e "  Pool: ${BOLD}${name}${NC} | Size: ${size} | Used: ${alloc} | Free: ${free} | Cap: ${cap} | Health: ${HEALTH_COLOR}${health}${NC}"
-    done
-fi
-
-# LVM Info
-if command -v pvs &>/dev/null; then
-  echo -e "\n  ${BOLD}LVM Physical Volumes:${NC}"
-  pvs --noheadings -o pv_name,vg_name,pv_size,pv_free 2>/dev/null | \
-    awk '{printf "  PV: %-15s VG: %-15s Size: %-8s Free: %s\n", $1, $2, $3, $4}'
-fi
-
-# =============================================================================
-# BAGIAN 4: NETWORK ANALYSIS
-# =============================================================================
-print_section "NETWORK ANALYSIS"
-
-echo -e "  ${BOLD}Interface Network:${NC}"
-ip -o addr show | grep -v "lo\|veth\|tap" | \
-  awk '{printf "  %-15s %s\n", $2, $4}'
-
-# Cek traffic (baca /proc/net/dev)
-echo -e "\n  ${BOLD}Network Traffic (kumulatif sejak boot):${NC}"
-cat /proc/net/dev | grep -v "lo:\|Inter\|face" | \
-  awk '{
-    if (NF >= 10) {
-      rx_mb = $2/1024/1024;
-      tx_mb = $10/1024/1024;
-      printf "  %-15s RX: %8.1f MB | TX: %8.1f MB\n", $1, rx_mb, tx_mb
-    }
-  }' | grep -v "^\s*$"
-
-# =============================================================================
-# BAGIAN 5: PROXMOX VM/CT STATUS
-# =============================================================================
-print_section "PROXMOX VM & CONTAINER STATUS"
-
-if command -v qm &>/dev/null; then
-  echo -e "  ${BOLD}Virtual Machines (KVM):${NC}"
-  VM_RUNNING=0
-  VM_STOPPED=0
-
-  qm list 2>/dev/null | tail -n +2 | while read -r vmid name status mem bootdisk pid; do
-    if [[ "$status" == "running" ]]; then
-      STATUS_COLOR="${GREEN}"
-      ((VM_RUNNING++)) 2>/dev/null
-    else
-      STATUS_COLOR="${YELLOW}"
-      ((VM_STOPPED++)) 2>/dev/null
-    fi
-    printf "  VMID: %-6s %-25s Status: ${STATUS_COLOR}%-10s${NC} RAM: %s MB\n" \
-      "$vmid" "$name" "$status" "$mem"
-  done
-
-  echo -e "\n  ${BOLD}Containers (LXC):${NC}"
-  pct list 2>/dev/null | tail -n +2 | while read -r vmid status lock name; do
-    if [[ "$status" == "running" ]]; then
-      STATUS_COLOR="${GREEN}"
-    else
-      STATUS_COLOR="${YELLOW}"
-    fi
-    printf "  CTID: %-6s %-25s Status: ${STATUS_COLOR}%s${NC}\n" \
-      "$vmid" "$name" "$status"
-  done
-fi
-
-# =============================================================================
-# BAGIAN 6: DISK HEALTH
-# =============================================================================
-print_section "DISK HEALTH (S.M.A.R.T)"
-
-if command -v smartctl &>/dev/null; then
-  for disk in /dev/sd? /dev/nvme?; do
-    [[ -b "$disk" ]] || continue
-    SMART_STATUS=$(smartctl -H "$disk" 2>/dev/null | grep "result:" | awk '{print $NF}')
-    TEMP=$(smartctl -A "$disk" 2>/dev/null | grep -i "temperature" | head -1 | awk '{print $(NF-1)}')
-
-    if [[ "$SMART_STATUS" == "PASSED" ]]; then
-      DISK_COLOR="${GREEN}"
-    elif [[ -n "$SMART_STATUS" ]]; then
-      DISK_COLOR="${RED}"
-    else
-      DISK_COLOR="${CYAN}"
-      SMART_STATUS="N/A"
-    fi
-
-    echo -e "  ${disk}: Health=${DISK_COLOR}${SMART_STATUS}${NC}  Temp=${TEMP:-N/A}°C"
-  done
-else
-  echo -e "  ${YELLOW}smartmontools tidak terinstall. Install: apt install smartmontools${NC}"
-fi
-
-# =============================================================================
-# BAGIAN 7: SERVICE STATUS
-# =============================================================================
-print_section "PROXMOX SERVICE STATUS"
-
-SERVICES=("pvedaemon" "pveproxy" "pvestatd" "pve-cluster" "corosync" "qemu-server" "pve-firewall")
-
-for svc in "${SERVICES[@]}"; do
-  STATUS=$(systemctl is-active "$svc" 2>/dev/null)
-  if [[ "$STATUS" == "active" ]]; then
-    echo -e "  ${GREEN}✓${NC} ${svc}: ${GREEN}${STATUS}${NC}"
-  elif [[ "$STATUS" == "inactive" ]]; then
-    echo -e "  ${YELLOW}○${NC} ${svc}: ${YELLOW}${STATUS}${NC}"
-  else
-    echo -e "  ${RED}✗${NC} ${svc}: ${RED}${STATUS:-tidak ditemukan}${NC}"
-  fi
-done
-
-# =============================================================================
-# BAGIAN 8: SUMMARY & REKOMENDASI
-# =============================================================================
-print_header "SUMMARY & REKOMENDASI"
-
-ISSUES=0
-WARNINGS=0
-
-# Evaluasi CPU
-if (( $(echo "$CPU_USAGE >= $CPU_CRITICAL" | bc -l) )); then
-  echo -e "  ${RED}❌ CPU KRITIS: ${CPU_USAGE}% - Segera investigasi proses berat!${NC}"
-  ((ISSUES++))
-elif (( $(echo "$CPU_USAGE >= $CPU_WARNING" | bc -l) )); then
-  echo -e "  ${YELLOW}⚠ CPU TINGGI: ${CPU_USAGE}% - Monitor dan pertimbangkan scale-up${NC}"
-  ((WARNINGS++))
-else
-  echo -e "  ${GREEN}✓ CPU NORMAL: ${CPU_USAGE}%${NC}"
-fi
-
-# Evaluasi RAM
-if (( $(echo "$RAM_PERCENT >= $RAM_CRITICAL" | bc -l) )); then
-  echo -e "  ${RED}❌ RAM KRITIS: ${RAM_PERCENT}% - Tambah RAM atau kurangi VM!${NC}"
-  ((ISSUES++))
-elif (( $(echo "$RAM_PERCENT >= $RAM_WARNING" | bc -l) )); then
-  echo -e "  ${YELLOW}⚠ RAM TINGGI: ${RAM_PERCENT}% - Pertimbangkan tambah RAM${NC}"
-  ((WARNINGS++))
-else
-  echo -e "  ${GREEN}✓ RAM NORMAL: ${RAM_PERCENT}%${NC}"
-fi
-
-# Evaluasi Storage (cek semua mount)
-df -h | grep -v "tmpfs\|udev\|/run\|/sys\|/proc\|/dev/pts\|Filesystem" | tail -n +2 | \
-  awk '{gsub(/%/,"",$5); if($5+0 >= 90) print "CRIT:"$NF":"$5; else if($5+0 >= 75) print "WARN:"$NF":"$5}' | \
-  while IFS=: read -r level mount pct; do
-    if [[ "$level" == "CRIT" ]]; then
-      echo -e "  ${RED}❌ STORAGE KRITIS: ${mount} ${pct}% - Segera bersihkan atau expand!${NC}"
-    else
-      echo -e "  ${YELLOW}⚠ STORAGE TINGGI: ${mount} ${pct}% - Pantau terus${NC}"
-    fi
-  done
-
-# Evaluasi Load
-if (( $(echo "$LOAD_PER_CPU >= $LOAD_CRITICAL" | bc -l) )); then
-  echo -e "  ${RED}❌ LOAD KRITIS: ${LOAD_1} (${LOAD_PER_CPU}/core) - Server overloaded!${NC}"
-  ((ISSUES++))
-elif (( $(echo "$LOAD_PER_CPU >= $LOAD_WARNING" | bc -l) )); then
-  echo -e "  ${YELLOW}⚠ LOAD TINGGI: ${LOAD_1} (${LOAD_PER_CPU}/core)${NC}"
-  ((WARNINGS++))
-fi
-
-echo ""
-if [[ $ISSUES -gt 0 ]]; then
-  echo -e "  ${RED}${BOLD}★ STATUS KESELURUHAN: KRITIS ($ISSUES masalah, $WARNINGS peringatan)${NC}"
-elif [[ $WARNINGS -gt 0 ]]; then
-  echo -e "  ${YELLOW}${BOLD}★ STATUS KESELURUHAN: PERLU PERHATIAN ($WARNINGS peringatan)${NC}"
-else
-  echo -e "  ${GREEN}${BOLD}★ STATUS KESELURUHAN: SEHAT - Semua resource dalam batas normal${NC}"
-fi
-
-echo ""
-echo -e "  ${BOLD}Rekomendasi Umum:${NC}"
-echo -e "  • Jadwalkan analisis rutin setiap jam/hari"
-echo -e "  • Setup alerting via email/Telegram untuk kondisi kritis"
-echo -e "  • Backup reguler sebelum perubahan besar"
-echo -e "  • Cek log: journalctl -u pvedaemon --since '24 hours ago'"
-
-echo -e "\n${BLUE}${BOLD}══════════════════════════════════════════════════════════════${NC}"
-echo -e "  Analisis selesai: $(date '+%Y-%m-%d %H:%M:%S')"
-echo -e "${BLUE}${BOLD}══════════════════════════════════════════════════════════════${NC}\n"
-```
-
-### 10.2 Script Monitor Berkelanjutan: `proxmox-monitor-loop.sh`
-
-```bash
-#!/bin/bash
-# Monitor berkelanjutan dengan alert ke log file
-# Penggunaan: bash proxmox-monitor-loop.sh 300  (cek setiap 300 detik / 5 menit)
-
-INTERVAL=${1:-300}
-LOG_FILE="/var/log/proxmox-monitor.log"
-ALERT_LOG="/var/log/proxmox-alerts.log"
-
-CPU_CRITICAL=90
-RAM_CRITICAL=95
-STORAGE_CRITICAL=90
-
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
-
-alert() {
-  echo "[ALERT][$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$ALERT_LOG"
-  logger -t "proxmox-monitor" "ALERT: $1"
-}
-
-log "Monitor dimulai. Interval: ${INTERVAL}s"
-
-while true; do
-  # CPU Check
-  CPU_IDLE=$(top -bn2 -d0.5 | grep "Cpu(s)" | tail -1 | awk '{print $8}' | tr -d '%id,')
-  CPU_USAGE=$(echo "100 - ${CPU_IDLE:-0}" | bc)
-  CPU_USAGE=$(printf "%.1f" "$CPU_USAGE")
-
-  # RAM Check
-  TOTAL_RAM=$(free -m | awk '/^Mem:/ {print $2}')
-  USED_RAM=$(free -m | awk '/^Mem:/ {print $3}')
-  RAM_PERCENT=$(echo "scale=1; $USED_RAM * 100 / $TOTAL_RAM" | bc)
-
-  log "CPU: ${CPU_USAGE}% | RAM: ${RAM_PERCENT}%"
-
-  # Alert CPU
-  if (( $(echo "$CPU_USAGE >= $CPU_CRITICAL" | bc -l) )); then
-    alert "CPU KRITIS: ${CPU_USAGE}% pada $(hostname)"
-  fi
-
-  # Alert RAM
-  if (( $(echo "$RAM_PERCENT >= $RAM_CRITICAL" | bc -l) )); then
-    alert "RAM KRITIS: ${RAM_PERCENT}% pada $(hostname)"
-  fi
-
-  # Alert Storage
-  df -h | grep -v "tmpfs\|udev" | awk '{gsub(/%/,"",$5); if($5+0 >= 90) print $NF" "$5"%"}' | \
-    while read -r mount pct; do
-      alert "STORAGE KRITIS: ${mount} ${pct} pada $(hostname)"
-    done
-
-  sleep "$INTERVAL"
-done
-```
-
-### 10.3 Script Laporan Harian: `proxmox-daily-report.sh`
-
-```bash
-#!/bin/bash
-# Kirim laporan harian via email (butuh mailutils: apt install mailutils)
-# Setup cron: 0 7 * * * /root/scripts/proxmox-daily-report.sh
-
-EMAIL="admin@perusahaan.com"
-SUBJECT="[Proxmox] Daily Report - $(hostname) - $(date '+%Y-%m-%d')"
-
-REPORT=$(bash /root/scripts/proxmox-analyzer.sh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
-
-echo "$REPORT" | mail -s "$SUBJECT" "$EMAIL"
-echo "Laporan dikirim ke $EMAIL"
-
-# Simpan laporan ke file
-echo "$REPORT" > "/var/log/proxmox-report-$(date '+%Y%m%d').log"
-```
-
-### 10.4 Setup Cron untuk Monitor Otomatis
+Jika Anda hanya ingin menyimpan hasil analisis masalah ke dalam log (tanpa n8n):
 
 ```bash
 # Edit crontab
 crontab -e
 
-# Tambahkan baris ini:
-# Analisis setiap 6 jam
-0 */6 * * * /root/scripts/proxmox-analyzer.sh >> /var/log/proxmox-analysis.log 2>&1
-
-# Laporan harian jam 07:00
-0 7 * * * /root/scripts/proxmox-daily-report.sh
-
-# Monitor berkelanjutan (jalankan sekali, berjalan di background)
-# @reboot /root/scripts/proxmox-monitor-loop.sh 300 &
+# Tambahkan baris ini untuk mengecek per 30 menit (hanya mencetak log jika ada masalah)
+*/30 * * * * bash /root/scripts/proxmox-analyzer.sh --alert-only --no-color --name="Node-01" >> /var/log/pve-alerts.log 2>&1
 ```
 
 ---
@@ -1314,6 +867,30 @@ ha-manager status
 # Lihat semua resource HA
 ha-manager config
 ```
+
+### 13.4 Eksekusi Live Migration (Migrasi Tanpa Mati)
+
+Tutorial *Backup* lazimnya memakan waktu karena data harus dibekukan. Tetapi bagaimana jika siang bolong Anda darurat melihat *RAM server fisik utama* mulai rusak/terbakar, dan aplikasi perusahaan tak boleh mati barang sesaat pun? Konsep penyelamatnya dinamakan **Live Migration**!
+- Fitur ini absolut mensyaratkan server tergabung dalam **satu Cluster** (Bab 13) dan memakai **Shared Storage** (seperti *Ceph/NFS* di Bab 7) agar semua host bisa mengakses file `disk` VM tersebut secara sejajar.
+- **Cara eksekusi**: Di GUI Proxmox, cukup Klik Kanan nama VM Anda → Pilih **Migrate** → Pilih panah *Target Node* fisik → Centang bagian **Online**.
+- **Keajaiban di balik layar**: Proxmox akan menembakkan isi RAM (memori kognitif) dari VM tersebut via kabel LAN dengan laju *Gigabit* tanpa perlu *Shut down*. Pada detik persis perpindahan, VM di mesin lama membeku (sekitar nol koma sekian milidetik), dan seketika bangun di mesin tujuan dan masih meneruskan pekerjaannya. Nyaris tak ada paket PING yang jatuh di hadapan *User*!
+
+### 13.5 ZFS Storage Replication (Disaster Recovery Kelas Ringan)
+
+Ceph sangat luar biasa (lihat Bab 7.4), namun mewajibkan kehadiran minimal 3 buah *server fisik* (Nodes) berspesifikasi super tinggi. Jika Anda **hanya memiliki 2 Server Proxmox**, Anda tidak direkomendasikan memakai Ceph. Sang penyelamat kemiskinan di skenario ini adalah **ZFS Replication**.
+
+- **Cara Kerja**: Jika kedua Node menggunakan partisi penggerak lokal berformat ZFS, Anda bisa menjadwalkan siklus sinkronisasi data antar VM setiap *15 menit* (atau bahkan super ketat setiap *1 menit*!). Proxmox hanya akan mendeteksi dan mengirim bit-bit data terkecil yang berubah (pemanfaatan insting *ZFS Send/Recv* delta) sehingga nyaris tidak membebani lalu lintas kabel LAN.
+- **Keuntungan Taktis (Disaster Recovery)**: Apabila Node 1 menelan korsleting listrik dan mati total, Anda hanya perlu Login ke Node 2, mencari bayangan (*replica*) VM tersebut, dan menekan tombol **Start**. VM akan spontan menyala dan batas kerugian data Anda *(Recovery Point Objective / RPO)* paling malang hanyalah mundurnya waktu sekitar 1-15 menit ke belakang.
+- **Cara Setup Secara GUI**: Di area kiri bawah per-layar VM Anda, kunjungi menu **Replication** → Klik **Add** → Tentukan *Target Node*, lalu di bagian jadwal (*Schedule*) ketik parameter dewasanya: `*/1` (sinkronisasi per 1 menit tanpa lelah).
+
+### 13.6 Corosync QDevice (Arbiter Pihak Ketiga untuk 2-Node)
+
+Sebagai kelanjutan dari ZFS Replication di *Cluster 2-Node*, ada satu celah hukum kritis: Jika Node 1 mati total, Node 2 secara *default* akan mengalami *Quorum Loss* (kehilangan suara mayoritas) dan sistem akan membekukan dirinya secara sepihak menjadi *Read-Only* untuk mencegah cacat *Split-Brain*. Anda terpaksa meretasnya manual via `pvecm expected 1` (Bab 17.7).
+
+Solusi *Standar Industri* untuk Cluster 2-Node yang direkomendasikan wiki resmi Proxmox adalah **QDevice (Quorum Device)**.
+- **Konsep**: Anda menginstal utilitas eksternal `corosync-qdevice` di mesin ketiga yang sangat murah dan *lightweight*, misal Raspberry Pi atau penyewaan VPS Cloud seharga Rp50Ribu/bulan.
+- Opsi ini tidak menyimpan data VM apa pun; wewenangnya *murni* hanya untuk menumpang memberikan **VOTING KETIGA (Tie-Breaker)**.
+- Dengan QDevice terkalibrasi, sewaktu Node 1 meledak, himpunan Node 2 + QDevice masih sah memegang 2 dari 3 suara, sehingga Node 2 tak akan meneteskan keringat kepanikan dan sisa cluster tetap hidup proporsional 100% bebas intervensi.
 
 ---
 
@@ -1650,11 +1227,121 @@ Setiap server production harus memiliki dokumentasi:
 - Level 3: Vendor Support - Proxmox Support - ticket system
 ```
 
+### 15.7 Aturan Sakral Sistem Update Proxmox (Waspada!)
+
+Banyak malapetaka dialami *System Administrator* pendatang baru yang lahir dari budaya *Debian/Ubuntu*. Ketika melihat pemberitahuan rilis (*updates*), refleks mereka adalah mengetikkan peluru ini di terminal: `apt update && apt upgrade`.
+Di kawasan ekosistem Proxmox, menekan `apt upgrade` **adalah dosa fatal** yang bisa menghancurleburkan seluruh pondasi *Host* Anda!
+
+1. Proxmox tak memakai *kernel* Debian biasa. Keterikatan komponen KVM, QEMU, dan sistem disk ZFS dirangkul teramat ketat (*tight software dependencies*). *Upgrade* standar bisa tidak sengaja 'menyisihkan' / 'mendepak' library vital Proxmox dan melahirkan kepincangan (*broken libraries*).
+2. **SOP Mutlak Berstandar Internasional**: Anda **selalu diwajibkan** mendaratkan perintah ini (*Distro-grade upgrade*):
+   ```bash
+   apt update
+   apt dist-upgrade   # Atau opsional memakai apt full-upgrade
+   ```
+3. Anda baru sadar betapa rawannya perintah ini makanya pihak pembuat menyematkan satu tombol spesial **"Upgrade"** tersendiri yang diprogram aman di dalam Web GUI Anda (*Node → System → Updates → Upgrade*).
+
 ---
 
-## 16. Troubleshooting Umum
+## 16. Fitur Advanced & Optimasi Lanjutan
 
-### 16.1 VM Tidak Bisa Start
+### 16.1 Limitasi RAM ZFS ARC (Sangat Penting!)
+
+Salah satu "jebakan" terbesar di Proxmox adalah **ZFS ARC (Adaptive Replacement Cache)**. Secara default, ZFS akan memakan hingga **50% dari total RAM fisik Anda** untuk menyimpan *cache* disk. Hal ini sering membuat admin panik karena RAM terlihat penuh, padahal itu hanya cache.
+
+Cara melimitasi ARC agar tidak rakus RAM (Misal: maksimal 4GB):
+
+```bash
+# 1. Edit / buat file modprobe ZFS
+nano /etc/modprobe.d/zfs.conf
+
+# 2. Tambahkan baris berikut (angka dalam Bytes, contoh 4GB = 4 * 1024^3 = 4294967296):
+options zfs zfs_arc_max=4294967296
+
+# 3. Update initramfs agar konfigurasi dimuat saat booting
+update-initramfs -u -k all
+
+# 4. Reboot server
+reboot
+```
+
+### 16.2 PCI / GPU Passthrough (IOMMU)
+
+Fitur ini memungkinkan Anda memberikan akses hardware fisik murni (*Direct Access*) ke dalam Virtual Machine. Sangat diidamkan untuk VM *Machine Learning* AI (NVIDIA GPU Passthrough) atau NAS (HBA Passthrough untuk TrueNAS).
+
+**Langkah Mengaktifkan IOMMU:**
+```bash
+# Edit GRUB
+nano /etc/default/grub
+
+# Tambahkan parameter intel_iommu=on (atau amd_iommu=on) di baris GRUB_CMDLINE_LINUX_DEFAULT
+# Contoh: GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_iommu=on iommu=pt"
+update-grub
+
+# Tambahkan modul kernel passthrough
+echo -e "vfio\nvfio_iommu_type1\nvfio_pci\nvfio_virqfd" >> /etc/modules
+
+# Update kernel dan Reboot
+update-initramfs -u -k all
+reboot
+```
+Setelah aktif, Anda bisa masuk ke setting VM → Hardware → Add PCI Device → Pilih GPU/Hardware fisik Anda.
+
+### 16.3 Proxmox Backup Server (PBS)
+
+Skrip dan metode standar menggunakan `vzdump` memiliki kelemahan: ia mencetak file *.tar* utuh secara manual. Untuk lingkungan profesional berskala besar, Proxmox memiliki produk terpisah berlogo hijau: **Proxmox Backup Server**.
+
+**Keunggulan Utama PBS:**
+- **Deduplikasi Tingkat Blok**: Menghemat ratusan Gigabyte karena blok data yang sama dari berbagai VM hanya disimpan 1 kali secara fisik.
+- **Incremental Backup Sejati**: Setelah proses backup penuh pertama kali, backup selanjutnya hanya menyimpan blok data *yang berubah* saja (hanya hitungan detik/menit).
+- **Ransomware Protection**: Mendukung *Tape Backup* tingkat lanjut dan enkripsi penuh.
+- PBS biasanya disematkan ke *bare-metal* server terpisah dari cluster Proxmox VE (PVE).
+
+### 16.4 Cloud-Init & Otomatisasi VM
+
+Bagi *cloud-engineer*, melakukan klik *"next-next"* saat mengamankan instalasi ISO Ubuntu sungguh memakan waktu. **Cloud-Init** memungkinkan Anda me-*deploy* puluhan VM kosong jadi langsung menyala, dengan user, IP Statis, dan *SSH Keys* yang sudah terinjeksi dari luar.
+
+**Cara Memanfaatkan Cloud-Init di Proxmox:**
+1. Download image Ubuntu/Debian versi *Cloud* (`.img`, bukan `.iso`).
+2. Buat VM baru tanpa media hardisk (`qm create`).
+3. Impor `.img` langsung ke *storage* Proxmox lalu jadikan *hardisk* utama (`qm importdisk`).
+4. Tambahkan drive virtual "CloudInit" dari Web GUI secara manual (Hardware → Add → CloudInit Drive).
+5. Pada Tab *Cloud-Init*, atur *username*, SSH Public Key, dan IP Address.
+6. Saat VM di-start, script kecil di dalam OS akan membaca dari Drive CloudInit Anda dan menjalankan autokonfigurasi secara ajaib!
+
+### 16.5 Infrastructure as Code (IaC) via Terraform & API
+
+Administrator pemula bangga bisa mengklik dengan cepat tombol-tombol antarmuka web (*Web GUI*) demi menelurkan 5 mesin virtual baru. Namun seorang *DevOps Cloud Engineer* sejati di perusahaan multinasional tak akan pernah sudi menyentuh tombol di GUI. Mereka bekerja menggenggam prinsip gaib **Infrastructure as Code (IaC)**.
+
+Alih-alih berletih lelah membangun server manual, Anda mendelegasikan perintah ini kepada perabot industri mutakhir seperti **Terraform** untuk mencambuk *Proxmox API* secara *Back-end*.
+- **Skenario Riil**: Anda menyusun barisan kalimat pemrograman pada dokumen teks biasa (`.tf`), mendeklarasikan: *"Hai Terraform, tolong sediakan untuk saya 50 VM Clone dari template Ubuntu, masing-masing injeksikan 4 Core CPU dan 8GB RAM, lalu lempar semuanya ke jalur VLAN-101."*
+- Cukup hantam perintah `terraform apply` di terminal Laptop Anda sambil menyeruput secangkir kopi. Terraform akan memerintah API Proxmox tanpa henti untuk meng-kloning, meracik jaringan, hingga mem-booting keseluruhan 50 VM Anda serentak dari udara kosong hanya dalam hitungan detik.
+- Apabila terjadi kelumpuhan infrastruktur global, Anda sama sekali tidak panik. Karena Anda punya *blueprint kode* aslinya, Anda sisa menekan Enter lagi, dan keseluruhan ekosistem server terbangun identik dari nol.
+
+Proxmox sudah menerima restu dan di-_backing_ resmi oleh pemelihara Terraform dunia (seperti *Telmate Proxmox Provider* atau *Ansible Proxmox Modules*). Kemampuan mentraslasikan klik Proxmox menjadi ketikan skrip inilah yang akan mengangkat profil gaji Anda ke tataran teknisi arsitektur puluhan juta rupiah.
+
+### 16.6 Akses Mentah: Raw Disk & USB Passthrough
+
+Di samping eksotisme GPU Passthrough (Bab 16.2), skenario operasional *Smart-Home* (seperti platform Home Assistant) atau ekosistem *NAS* terdedikasi (TrueNAS) acapkali mewajibkan jalur pintas murni ke *hardware*.
+- **Raw Disk Passthrough**: Tinimbang mem-format *hardisk* 4TB baru menjadi lapisan partisi abstraksi VM (*ZFS/LVM*), Anda bisa mendepak *hardisk* fisik seutuhnya menabrak masuk ke dimensi OS VM (*block-level access*).
+  - Tentukan persis ID Disk fisik Anda (dilarang keras memakai alias seperti `/dev/sda` yang bisa berubah saat *reboot*): `ls -l /dev/disk/by-id/`
+  - Tembakkan ia ke jantung VM via CLI: `qm set 100 -scsi1 /dev/disk/by-id/ata-ST4000VN008-2DR...`
+- **USB Passthrough**: Esensial sewaktu VM Home Assistant menuntut sinkronisasi antena radio *USB Zigbee/Bluetooth* fisik yang menduduki port eksterior server Anda. Tinggal raih via *Hardware → Add → USB Device → Set ke 'Use USB Vendor/Device ID'*.
+
+*(Peringatan: Seluruh partisi raw-disk yang di-passthrough dilarang untuk ikut diotomatisasi pada siklus backup).*
+
+### 16.7 Nested Virtualization (Menjalankan Proxmox di dalam Proxmox)
+
+Sangat lazim tatkala pakar IT hendak membina kurikulum tanpa tega membakar bujet untuk *hardware* baru yang mahal. **Nested Virtualization** mengistimewakan Anda untuk menetaskan *Hypervisor* (induk seperti Proxmox atau VMware ESXi) menumpang hidup subur di dalam VM Proxmox Anda!
+1. Inspek pertama kalinya jika keran saklar fitur ini secara bawaan telah terbuka pada *kernel host*: `cat /sys/module/kvm_intel/parameters/nested` (valid jika mereturnasikan karakter **Y** atau **1**).
+2. Jika ia bisu (N/0), hidupkan paksa di akar kernel OS Linux induknya: `echo "options kvm-intel nested=Y" > /etc/modprobe.d/kvm-intel.conf` diikuti me-*reload* modul `modprobe kvm_intel`.
+3. Menjelang kreasi penciptaan wujud VM Proxmox virtualnya pada antarmuka Web, tukar spesifikasi mutlak **CPU Type** dari *kvm64/default* beralih menjadi jenis rujukan **host**.
+4. Ajaib! Segala rantai instruksi *VT-x Hardware* dari mainboard fisik tembus tanpa tersumbat merasuk ke inti CPU sang OS "cucu", mengkaderkannya siap mencetak ribuan VM level turunan ke-3.
+
+---
+
+## 17. Troubleshooting Umum
+
+### 17.1 VM Tidak Bisa Start
 
 ```bash
 # Cek error dari log
@@ -1674,7 +1361,7 @@ qm stop 100 --timeout 0
 kill -9 $(pgrep -f "kvm.*100")
 ```
 
-### 16.2 Web UI Tidak Bisa Diakses
+### 17.2 Web UI Tidak Bisa Diakses
 
 ```bash
 # Cek service
@@ -1690,7 +1377,7 @@ ss -tlnp | grep 8006
 pvecm updatecerts --force
 ```
 
-### 16.3 Storage Penuh
+### 17.3 Storage Penuh
 
 ```bash
 # Cari file besar
@@ -1709,7 +1396,7 @@ rm /var/lib/vz/dump/vzdump-qemu-XXX-YYYY_MM_DD*.vma.zst  # Sesuaikan nama file
 ls /var/lib/vz/template/
 ```
 
-### 16.4 Node Keluar dari Cluster
+### 17.4 Node Keluar dari Cluster
 
 ```bash
 # Cek status cluster
@@ -1728,7 +1415,7 @@ systemctl restart corosync pve-cluster
 pvecm expected 1  # Temporary fix jika satu node tersisa
 ```
 
-### 16.5 High CPU Load
+### 17.5 High CPU Load
 
 ```bash
 # Identifikasi VM penyebab
@@ -1748,18 +1435,119 @@ qm set 100 --cpulimit 2  # Max 2 core equivalent
 qm set 100 --cpuunits 512  # Prioritas CPU (default 1024)
 ```
 
+### 17.6 Kejadian Tak Terduga: VM Terkunci (Locked VM)
+
+**Skenario**: Anda mencoba *Start*, *Stop*, atau menghapus VM, tetapi Proxmox menampilkan error kemerahan berbunyi: `VM is locked (backup/migrate/snapshot/clone)`.
+**Penyebab**: Proses (seperti Backup semalam atau *Clone*) terputus paksa di tengah jalan sehingga file *lock* / kunci tidak sempat dihapus oleh sistem.
+
+**Solusi Resmi**:
+Langkah paling aman menurut pedoman resmi adalah melepaskan kuncinya menggunakan `qm` atau `pct`.
+```bash
+# Untuk mesin virtual (KVM)
+qm unlock <VMID>
+# Contoh: qm unlock 100
+
+# Untuk Container (LXC)
+pct unlock <CTID>
+```
+*Catatan:* Sebelum melakukan ini, pastikan memang tidak ada proses *vzdump* (backup) atau migrasi yang *benar-benar* masih berjalan di *background*.
+
+### 17.7 Kejadian Tak Terduga: Cluster Quorum Hilang (Split-Brain)
+
+**Skenario**: Anda memiliki 3 server di cluster. Tiba-tiba kabel jaringan putus atau switch mati yang menyebabkan 2 server *offline*. Anda login ke server ke-3 yang tersisa, tetapi Anda tidak bisa mengedit apapun, tidak bisa start VM, icon di GUI muncul tanda tanya (?) abu-abu, dan terbaca *Read-Only*.
+**Penyebab**: Sistem *Quorum* Proxmox mencegah satu node bertindak sendiri saat tersolasi untuk menghindari korupsi data (*Split-Brain protection*). Node butuh "suara mayoritas" agar bisa mengubah konfigurasi.
+
+**Solusi Darurat**:
+Anda bisa melemahkan hukum mayoritas ini (secara sementara) agar server yang tersisa bisa kembali dioperasikan secara normal (bisa Read/Write).
+```bash
+# Beritahu Proxmox bahwa mulai sekarang, "1 node" saja sudah cukup dianggap sebagai kourum (mayoritas)
+pvecm expected 1
+```
+*(Perhatian: Hanya lakukan ini jika Anda yakin bahwa node lain memang benar-benar mati dan VM-nya tidak sedang menyala memperebutkan storage disk yang sama.)*
+
+### 17.8 Kejadian Tak Terduga: Tiba-tiba VM Mati / Hilang (OOM Killer)
+
+**Skenario**: Beberapa VM Anda sering mati mendadak pada jam-jam sibuk. Tidak ada catatan *error* di GUI, tiba-tiba VM stop saja.
+**Penyebab**: Terjadi *Out-Of-Memory* (OOM). Ketika sisa RAM fisik Proxmox benar-benar menyentuh angka 0, *kernel* Linux memiliki sang algojo (*OOM Killer*) yang akan menembak mati proses yang paling rakus RAM secara membabi-buta demi menyelamatkan OS Proxmox agar tidak *crash*. Seringkali korbannya adalah proses `qemu-server` (VM Anda).
+
+**Solusi Investigasi**:
+```bash
+# Cek catatan pembunuhan oleh algojo (OOM Killer)
+dmesg -T | grep -i oom
+```
+Solusi kuratifnya: Anda harus membatasi batas ZFS ARC (lihat Bab 16.1), mengurangi jumlah alokasi (overcommit) RAM VM, atau segera beli keping RAM fisik tambahan.
+
+### 17.9 Kejadian Tak Terduga: Lupa Password VM / Container
+
+**Skenario**: Anda lama tidak membuka sebuah *Virtual Machine* atau *Container* dan benar-benar lupa *password* root atau admin utamanya.
+
+**Solusi 1: Untuk Container (LXC)**
+Ini adalah keuntungan menggunakan LXC. Karena LXC berbagi *kernel* dengan Proxmox, superadmin Proxmox memiliki "kunci master" untuk menerobos masuk tanpa *password* sama sekali.
+```bash
+# 1. Dari terminal Proxmox, paksa masuk ke dalam CT sebagai root
+pct enter <CTID>   # Contoh: pct enter 200
+
+# 2. Sekarang Anda berada di dalam sistem tersebut! Langsung ganti passwordnya
+passwd root
+
+# 3. Masukkan password baru 2x. Keluar dengan mengetik "exit". Selesai!
+```
+
+**Solusi 2: Untuk Virtual Machine Linux (KVM)**
+Berbeda dengan LXC, mesin KVM diisolasi penuh. Proxmox tidak bisa asal menembus dindingnya. Anda harus menggunakan jurus peretasan *GRUB Bootloader*.
+1. Buka halaman **Console** VM tersebut.
+2. *Reboot* mesinnya, dan saat layar **GRUB** (pemilihan OS) muncul, cepat tekan tombol **ESC** atau **E** di keyboard agar ia menjeda (tidak langsung masuk OS).
+3. Cari baris yang berawalan kata `linux` atau `linux16`.
+4. Di ujung baris tersebut, ketikkan spasi lalu tambahkan `rw init=/bin/bash`
+5. Tekan **Ctrl + X** atau **F10** untuk melanjutkan *boot*.
+6. VM akan mem-buka terminal berlatar hitam secara ajaib tanpa meminta password (akses level kernel murni)!
+7. Ketik `passwd`, ganti password Anda, lalu paksa *restart* mesin tersebut.
+
+**Solusi 3: Untuk Virtual Machine Windows (KVM)**
+Jika VM Anda berisi OS Windows:
+1. Pasang/Mount ISO installer Windows di CD/DVD Drive VM tersebut.
+2. Matikan paksa VM, ubah *Boot Order* agar booting dari CD-ROM.
+3. Saat masuk layar instalasi Windows, tekan **Shift + F10** (Terminal CMD akan terbuka).
+4. Gunakan trik memanipulasi `Utilman.exe` milik Windows yang legendaris, kembalikan *Boot Order* ke *Hardisk*, dan saat berada di layar login Windows, Anda bisa menggunakan terminal darurat berhak administrator untuk `net user Administrator passwordBaru`!
+
+### 17.10 Kejadian Tak Terduga: Lupa Password Root Induk Proxmox Sendiri
+
+**Skenario**: Mimpi buruk terburuk! Server menyala, tapi Anda lupa *password* akses `root` ke Web GUI / Terminal server Proxmox Anda sendiri.
+**Penyebab**: Terlalu banyak memegang akun atau administrator lama baru saja ditiadakan.
+
+**Solusi Darurat**:
+Skenario ini mewajibkan Anda hadir di depan server fisik (atau menggunakan fasilitas iLO / iDRAC / IPMI KVM dari Data Center).
+1. Sambungkan Keyboard dan Monitor ke mesin fisik Proxmox Anda.
+2. *Restart* paksa server secara fisik.
+3. Saat *Blue Screen GRUB* bertuliskan **Proxmox Virtual Environment GNU/Linux** muncul, buru-buru tekan tombol **E** untuk mengedit instruksi *booting*.
+4. Gulir ke bawah hingga menemukan baris yang dimulai dengan kata kunci `linux`.
+5. Di akhir persis baris tersebut, tambahkan teks: `init=/bin/bash`
+6. Lalu tekan **F10** untuk menyalakan ulang.
+7. Anda akan dihadapkan pada terminal berhak super-user. Ketikkan:
+   ```bash
+   # Remount ulang disk agar bisa ditulis
+   mount -o remount,rw /
+   
+   # Paksa reset password yang lama!
+   passwd root
+   
+   # Simpan perubahan dan reboot
+   exec /sbin/init
+   ```
+Sekarang Anda bisa kembali login ke GUI portal 8006 kesayangan Anda!
+
 ---
 
-## 17. Referensi & Panduan Lanjutan
+## 18. Referensi & Panduan Lanjutan
 
-### 17.1 Dokumentasi Resmi
+### 18.1 Dokumentasi Resmi
 
 - **Proxmox VE Docs**: <https://pve.proxmox.com/pve-docs/>
 - **Proxmox Wiki**: <https://pve.proxmox.com/wiki/Main_Page>
 - **Proxmox Forum**: <https://forum.proxmox.com/>
 - **Proxmox API**: <https://pve.proxmox.com/pve-docs/api-viewer/>
 
-### 17.2 Perintah CLI Penting — Quick Reference
+### 18.2 Perintah CLI Penting — Quick Reference
 
 ```bash
 # ─── VM MANAGEMENT ───────────────────────────────────────────
