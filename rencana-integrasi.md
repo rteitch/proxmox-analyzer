@@ -1,13 +1,3 @@
-Ran command: `git branch -M main`
-Ran command: `git add .`
-Ran command: `git commit -m "project proxmox-analyzer"`
-Ran command: `git push`
-Ran command: `git push -u origin main`
-
-Pertanyaan bagus! Ini murni diskusi arsitektur dulu, tidak ada perubahan script. Mari saya rancang blueprint-nya:
-
-Baik, saya jawab langsung di sini karena file artifact sedang bermasalah.
-
 ---
 
 ## 🔗 Blueprint Integrasi: proxmox-analyzer.sh + n8n + Telegram/WhatsApp
