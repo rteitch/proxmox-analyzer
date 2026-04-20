@@ -29,7 +29,7 @@
 
 | Fitur | Keterangan |
 |-------|-----------|
-| **CPU Analysis** | Penggunaan CPU, load average, CPU steal time, suhu per-core |
+| **CPU Analysis** | Penggunaan CPU, load average, CPU steal time |
 | **I/O Wait** | Deteksi bottleneck storage yang menyebabkan VM lag |
 | **RAM Analysis** | Penggunaan RAM, swap, ZFS ARC cache, KSM deduplication |
 | **Storage** | Filesystem, Proxmox storage pool, ZFS pool, LVM |
@@ -67,16 +67,12 @@
 |---------|----------------------|---------|
 | `sysstat` | IOWait detail, per-device I/O stats | `apt install -y sysstat` |
 | `smartmontools` | Disk health SMART, suhu disk, critical attrs | `apt install -y smartmontools` |
-| `lm-sensors` | Suhu CPU per-core | `apt install -y lm-sensors` |
 | `python3` | Task history JSON parsing | Biasanya sudah ada di Proxmox |
 
 ### Install Semua Sekaligus
 
 ```bash
-apt install -y bc sysstat smartmontools lm-sensors
-
-# Setup sensor CPU (jawab YES / ENTER terus, jalankan sekali saja)
-sensors-detect
+apt install -y bc sysstat smartmontools
 ```
 
 > **Catatan**: Jika package opsional tidak terinstall, script tetap berjalan normal. Bagian yang memerlukan package tersebut akan menampilkan pesan informasi dan dilewati.
@@ -108,8 +104,7 @@ chmod +x /root/scripts/proxmox-analyzer.sh
 ### Langkah 3 — Install Dependensi
 
 ```bash
-apt install -y bc sysstat smartmontools lm-sensors
-sensors-detect
+apt install -y bc sysstat smartmontools
 ```
 
 ### Langkah 4 — Verifikasi
@@ -259,7 +254,7 @@ grep "KRITIS" /var/log/pve-analyzer.log
 
 ### Bagian 1 — CPU Analysis
 
-Menampilkan penggunaan CPU, load average, CPU steal time, dan suhu per-core.
+Menampilkan penggunaan CPU, load average, dan CPU steal time.
 
 **Breakdown CPU:**
 
@@ -451,8 +446,6 @@ SWAP_WARNING=30       # % swap warning
 SWAP_CRITICAL=70      # % swap kritis
 DISK_TEMP_WARNING=45  # derajat Celcius suhu disk warning
 DISK_TEMP_CRITICAL=55 # derajat Celcius suhu disk kritis
-CPU_TEMP_WARNING=75   # derajat Celcius suhu CPU warning
-CPU_TEMP_CRITICAL=90  # derajat Celcius suhu CPU kritis
 ```
 
 ### Contoh Penyesuaian
@@ -608,19 +601,7 @@ smartctl -a /dev/sda -d sat
 apt install -y sysstat
 ```
 
----
 
-### Suhu CPU tidak tersedia
-
-**Penyebab**: `lm-sensors` belum dikonfigurasi.
-
-```bash
-apt install -y lm-sensors
-sensors-detect  # Jawab YES/ENTER terus
-sensors         # Test
-```
-
----
 
 ### Disk arsip saya ikut terbangun dari sleep
 
@@ -686,13 +667,11 @@ Script akan otomatis fallback ke tampilan raw output. Tidak masalah.
 /proc/net/dev                               → Network counters
 /proc/spl/kstat/zfs/arcstats               → ZFS ARC stats
 /sys/kernel/mm/ksm/                        → KSM info
-/sys/class/thermal/                        → Suhu CPU
 /sys/fs/cgroup/                            → Resource container
 vmstat, free, df, ip                        → System tools
 pvesm, qm, pct, pvecm, pvesh               → Proxmox API (read only)
 smartctl --nocheck=standby                  → SMART (tidak wake disk)
 journalctl -k, dmesg                       → Kernel log (read only)
-sensors                                    → Hardware sensors
 ```
 
 ---
