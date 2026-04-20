@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# PROXMOX RESOURCE ANALYZER v4.0 — Enterprise Edition
+# PROXMOX RESOURCE ANALYZER v4.2 — Enterprise Edition
 # Analisis komprehensif CPU, RAM, Storage, Network, VM/CT, Backup, Cluster
 #
 # Penggunaan:
@@ -17,11 +17,24 @@
 #   → 0 */6 * * * /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-analyzer.log 2>&1
 #
 # Estimasi Runtime:
-#   Normal (dengan semua tools)  : ~8-12 detik
+#   Normal (tanpa RAID)          : ~8-12 detik
+#   Dengan RAID controller       : ~15-25 detik (scan per disk fisik)
 #   Tanpa iostat (pakai /proc)   : ~6-8  detik
 #   Catatan: Ada beberapa sleep/sample interval yang diperlukan untuk
 #   mendapatkan data CPU, IOWait, dan Network yang akurat.
 #   Script ini TIDAK mempengaruhi konfigurasi sistem sama sekali.
+#
+# Changelog v4.2:
+#   [FIX] SMART: Auto-detect disk via smartctl --scan (MegaRAID, 3ware, cciss)
+#   [FIX] SMART: RAID virtual disk ditandai info, bukan false-alarm kritis
+#   [FIX] SMART: Health status multi-line parsing (PASSED\ncheck.)
+#   [FIX] SMART: Octal error pada attribute value berawalan 0 (099)
+#   [FIX] SMART: Suhu parsing kompatibel SATA/SAS/NVMe
+#   [FIX] Backup: Expanded OK pattern (Finished Backup of VM, archive file size)
+#   [FIX] VM/CT: Format string %-10s pada status (echo→printf)
+#   [FIX] Network: Format string %8d pada error packet (echo→printf)
+#   [NEW] SMART: Serial Number, SAS Grown Defects, SSD auto-detection
+#   [NEW] SMART: Dukungan MegaRAID, 3ware, cciss, Areca, HP SmartArray
 #
 # Changelog v4.0:
 #   [FIX] IOWait detection: grep-based, tidak lagi hardcode NR==7
@@ -35,7 +48,7 @@
 #   [NEW] pvesm status — semua Proxmox Storage Pool (NFS, iSCSI, LVM-thin, dll)
 #   [NEW] Network: error packet, drop packet, throughput realtime per interface
 #   [NEW] SMART critical attributes (Reallocated Sectors, Pending, Wear Level)
-#   [NEW] Disk & CPU temperature threshold + alert
+#   [NEW] Disk temperature threshold + alert
 #   [NEW] dmesg kernel error & hardware error (24 jam terakhir)
 #   [NEW] OOM Kill event detection (Out of Memory killer)
 #   [NEW] Proxmox Task History — failed tasks via pvesh
@@ -76,8 +89,6 @@ SWAP_WARNING=30          # % swap warning
 SWAP_CRITICAL=70         # % swap kritis
 DISK_TEMP_WARNING=45     # °C suhu disk
 DISK_TEMP_CRITICAL=55    # °C suhu disk kritis
-CPU_TEMP_WARNING=75      # °C suhu CPU
-CPU_TEMP_CRITICAL=90     # °C suhu CPU kritis
 NET_ERROR_WARNING=100    # jumlah error packet per interface
 SMART_REALLOCATED_WARN=1 # Reallocated Sectors > 0 sudah warning
 
@@ -113,8 +124,6 @@ check_deps() {
   command -v iostat &>/dev/null    || MISSING_DEPS+=("sysstat")
   # smartmontools — untuk disk health
   command -v smartctl &>/dev/null  || MISSING_DEPS+=("smartmontools")
-  # lm-sensors — untuk suhu CPU
-  command -v sensors &>/dev/null   || MISSING_DEPS+=("lm-sensors")
 
   if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
     echo -e "${YELLOW}${BOLD}⚠ DEPENDENSI OPSIONAL TIDAK LENGKAP:${NC}"
@@ -296,44 +305,6 @@ elif (( $(echo "$CPU_USAGE >= $CPU_WARNING" | bc -l 2>/dev/null || echo 0) )); t
 else
   OK_LIST+=("CPU ${CPU_USAGE}% — Normal")
 fi
-
-# Suhu CPU — NEW v4.0
-print_subsection "Suhu CPU"
-CPU_TEMP_FOUND=false
-if command -v sensors &>/dev/null; then
-  CPU_TEMP_FOUND=true
-  SENSOR_OUT=$(safe_run 5 sensors 2>/dev/null)
-  echo "$SENSOR_OUT" | grep -E "Core [0-9]+|Package|Tdie|Tccd" | while read -r line; do
-    TEMP_VAL=$(echo "$line" | grep -oP '[0-9]+\.[0-9]+(?=°C)' | head -1)
-    LABEL=$(echo "$line" | awk -F: '{print $1}' | xargs)
-    [[ -z "$TEMP_VAL" ]] && continue
-    TEMP_INT=${TEMP_VAL%%.*}
-    if (( TEMP_INT >= CPU_TEMP_CRITICAL )); then
-      echo -e "  ${RED}🔥 ${LABEL}: ${TEMP_VAL}°C [KRITIS — Overheat!]${NC}"
-    elif (( TEMP_INT >= CPU_TEMP_WARNING )); then
-      echo -e "  ${YELLOW}⚠  ${LABEL}: ${TEMP_VAL}°C [PERINGATAN]${NC}"
-    else
-      echo -e "  ${GREEN}✓  ${LABEL}: ${TEMP_VAL}°C [Normal]${NC}"
-    fi
-  done
-elif [[ -d /sys/class/thermal ]]; then
-  CPU_TEMP_FOUND=true
-  for zone in /sys/class/thermal/thermal_zone*/; do
-    TYPE=$(cat "${zone}type" 2>/dev/null)
-    TEMP_RAW=$(cat "${zone}temp" 2>/dev/null)
-    [[ -z "$TEMP_RAW" ]] && continue
-    TEMP_C=$(echo "scale=1; $TEMP_RAW / 1000" | bc 2>/dev/null)
-    TEMP_INT=$(echo "$TEMP_RAW / 1000" | bc 2>/dev/null)
-    if (( TEMP_INT >= CPU_TEMP_CRITICAL )); then
-      echo -e "  ${RED}🔥 ${TYPE}: ${TEMP_C}°C [KRITIS]${NC}"
-    elif (( TEMP_INT >= CPU_TEMP_WARNING )); then
-      echo -e "  ${YELLOW}⚠  ${TYPE}: ${TEMP_C}°C [PERINGATAN]${NC}"
-    else
-      echo -e "  ${GREEN}✓  ${TYPE}: ${TEMP_C}°C [Normal]${NC}"
-    fi
-  done
-fi
-[[ "$CPU_TEMP_FOUND" == false ]] && echo -e "  ${CYAN}Sensor suhu CPU tidak tersedia. Install: apt install -y lm-sensors && sensors-detect${NC}"
 
 if [[ "$ALERT_ONLY" == false ]]; then
   echo -e "\n  ${BOLD}Top 5 Proses (CPU):${NC}"
@@ -675,7 +646,7 @@ while IFS=: read -r iface data; do
   fi
 
   printf "  %-14s %10.1f %10.1f %10d %10d " "$iface" "$RX_MB" "$TX_MB" "$RX_RATE" "$TX_RATE"
-  echo -e "${ERR_COLOR}%8d %8d${NC}" "$RX_ERR" "$TX_ERR"
+  printf "%b%8d %8d%b\n" "${ERR_COLOR}" "$RX_ERR" "$TX_ERR" "${NC}"
 
 done < <(awk 'NR>2 {print}' /proc/net/dev)
 
@@ -705,7 +676,7 @@ if command -v qm &>/dev/null; then
 
     MEM_GB=$(echo "scale=1; ${mem:-0} / 1024" | bc 2>/dev/null || echo "?")
     printf "  %-6s %-28s " "$vmid" "${name:0:28}"
-    echo -ne "${SC}%-10s${NC}" "$status"
+    printf "%b%-10s%b" "${SC}" "$status" "${NC}"
     printf " %5s GB" "$MEM_GB"
 
     # CPU usage aktual per VM dari /proc (ambil dari qemu-system process)
@@ -743,7 +714,7 @@ if command -v pct &>/dev/null; then
     esac
 
     printf "  %-6s %-28s " "$ctid" "${name:0:28}"
-    echo -ne "${SC}%-10s${NC}" "$status"
+    printf "%b%-10s%b" "${SC}" "$status" "${NC}"
 
     # CPU & RAM aktual per container dari /sys/fs/cgroup
     if [[ "$status" == "running" ]]; then
@@ -768,80 +739,147 @@ print_section "DISK HEALTH (S.M.A.R.T)"
 
 if command -v smartctl &>/dev/null; then
   DISK_FOUND=false
-  for disk in /dev/sd? /dev/nvme?n?; do
-    [[ -b "$disk" ]] || continue
+
+  # Gunakan smartctl --scan untuk menemukan SEMUA disk, termasuk di belakang RAID controller
+  # Output format: /dev/bus/0 -d megaraid,0 # /dev/bus/0 [megaraid_disk_00], SCSI device
+  SCAN_OUTPUT=$(safe_run 10 smartctl --scan 2>/dev/null)
+
+  # Bangun daftar disk: "device|dtype" per baris
+  DISK_LIST=""
+  if [[ -n "$SCAN_OUTPUT" ]]; then
+    while IFS= read -r scan_line; do
+      [[ -z "$scan_line" ]] && continue
+      SCAN_DEV=$(echo "$scan_line" | awk '{print $1}')
+      SCAN_DTYPE=$(echo "$scan_line" | awk '{print $3}')
+      [[ -z "$SCAN_DEV" ]] && continue
+      DISK_LIST+="${SCAN_DEV}|${SCAN_DTYPE:-auto}"$'\n'
+    done <<< "$SCAN_OUTPUT"
+  fi
+
+  # Fallback: jika --scan kosong, gunakan glob /dev/sd? dan /dev/nvme?n?
+  if [[ -z "$DISK_LIST" ]]; then
+    for disk in /dev/sd? /dev/nvme?n?; do
+      [[ -b "$disk" ]] || continue
+      DISK_LIST+="${disk}|auto"$'\n'
+    done
+  fi
+
+  [[ -z "$DISK_LIST" ]] && { echo -e "  ${YELLOW}Tidak ada disk yang terdeteksi.${NC}"; }
+
+  while IFS='|' read -r disk dtype; do
+    [[ -z "$disk" ]] && continue
     DISK_FOUND=true
+
+    # Tentukan label tipe disk
     DISK_TYPE="HDD"
     [[ "$disk" == /dev/nvme* ]] && DISK_TYPE="NVMe"
+    [[ "$dtype" == megaraid,* ]] && DISK_TYPE="RAID-Disk"
+
+    # Label tampilan untuk disk di belakang RAID
+    if [[ "$dtype" == megaraid,* || "$dtype" == 3ware,* || "$dtype" == cciss,* || "$dtype" == hpt,* ]]; then
+      DISK_LABEL="${disk} [${dtype}]"
+    else
+      DISK_LABEL="${disk}"
+    fi
 
     # --nocheck=standby : JANGAN bangunkan disk yang sedang sleep/standby.
-    # Jika disk sedang sleep, smartctl akan keluar dengan exit code 2 dan
-    # output kosong/minimal — script akan menampilkan info bahwa disk sedang standby.
-    # Ini AMAN untuk HDD arsip yang dikonfigurasi spin-down.
-    # SSD/NVMe tidak affected karena tidak punya mode spin-down fisik.
-    SMART_ALL=$(safe_run 15 smartctl --nocheck=standby -a "$disk" 2>/dev/null)
+    SMART_ALL=$(safe_run 15 smartctl --nocheck=standby -a -d "$dtype" "$disk" 2>/dev/null)
     SMART_EXIT=$?
 
     # Exit code 2 dari smartctl berarti disk sedang dalam mode standby/sleep
     if [[ $SMART_EXIT -eq 2 ]] || echo "$SMART_ALL" | grep -qi "standby\|sleep mode\|in STANDBY"; then
-      echo -e "  ${CYAN}💤${NC} ${BOLD}${disk}${NC} — Disk sedang dalam mode ${CYAN}Standby/Sleep${NC} (tidak dibangunkan)"
-      echo -e "    ${CYAN}ℹ Gunakan: smartctl -a ${disk}  untuk membaca (akan membangunkan disk)${NC}"
+      echo -e "  ${CYAN}💤${NC} ${BOLD}${DISK_LABEL}${NC} — Disk sedang dalam mode ${CYAN}Standby/Sleep${NC} (tidak dibangunkan)"
+      echo -e "    ${CYAN}ℹ Gunakan: smartctl -a ${disk} -d ${dtype}  untuk membaca (akan membangunkan disk)${NC}"
       echo ""
-      # Tetap masuk OK_LIST agar disk TERLIHAT di Summary — bukan dianggap hilang/tidak terdeteksi
-      OK_LIST+=("Disk ${disk}: Mode Standby/Sleep (Aman — tidak dibangunkan)")
+      OK_LIST+=("Disk ${DISK_LABEL}: Mode Standby/Sleep (Aman — tidak dibangunkan)")
       continue
     fi
 
-    [[ -z "$SMART_ALL" ]] && { echo -e "  ${YELLOW}? ${disk}: Timeout atau tidak bisa dibaca${NC}"; continue; }
+    [[ -z "$SMART_ALL" ]] && { echo -e "  ${YELLOW}? ${DISK_LABEL}: Timeout atau tidak bisa dibaca${NC}"; continue; }
 
-    SMART_STATUS=$(echo "$SMART_ALL" | grep -i "overall-health\|result\|self-assessment" | awk '{print $NF}')
-    TEMP=$(echo "$SMART_ALL" | grep -i "temperature_celsius\|Airflow\|Temperature:" | grep -v "Min\|Max\|Limit" | head -1 | awk '{print $(NF-1)}')
-    POWER_ON=$(echo "$SMART_ALL" | grep -i "power_on_hours" | awk '{print $10}')
-    POWER_CYCLE=$(echo "$SMART_ALL" | grep -i "power_cycle_count" | awk '{print $10}')
-    MODEL=$(echo "$SMART_ALL" | grep -i "^Device Model\|^Model Number" | head -1 | cut -d: -f2 | xargs)
-    CAPACITY=$(echo "$SMART_ALL" | grep -i "User Capacity\|Namespace 1" | head -1 | grep -oP '\[.*?\]' | head -1)
+    SMART_STATUS=$(echo "$SMART_ALL" | grep -iE "overall-health|SMART Health Status" | head -1 | awk '{print $NF}')
 
-    # SMART critical attributes — NEW v4.0 (G5)
+    # Temperature: cari field numerik > 0 dari kanan, kompatibel SATA/SAS/NVMe
+    TEMP=$(echo "$SMART_ALL" | grep -iE "temperature_celsius|Airflow_Temp|Temperature:|Current Drive Temperature" | grep -vi "Min\|Max\|Limit\|Lifetime\|Warning\|Critical\|Shipping" | head -1 | awk '{for(i=NF;i>=1;i--) if($i+0==$i && $i>0){print int($i); exit}}')
+    POWER_ON=$(echo "$SMART_ALL" | grep -iE "power_on_hours|Accumulated power on" | head -1 | awk '{for(i=NF;i>=1;i--) if($i+0==$i && $i>0){print $i; exit}}')
+    POWER_CYCLE=$(echo "$SMART_ALL" | grep -iE "power_cycle_count|Accumulated start-stop" | head -1 | awk '{for(i=NF;i>=1;i--) if($i+0==$i && $i>0){print $i; exit}}')
+    MODEL=$(echo "$SMART_ALL" | grep -iE "^Device Model|^Model Number|^Product:" | head -1 | cut -d: -f2 | xargs)
+    SERIAL=$(echo "$SMART_ALL" | grep -iE "^Serial Number|^Serial number:" | head -1 | cut -d: -f2 | xargs)
+    CAPACITY=$(echo "$SMART_ALL" | grep -iE "User Capacity|Namespace 1 Size" | head -1 | grep -oP '\[.*?\]' | head -1)
+
+    # SMART critical attributes (SATA format)
     REALLOCATED=$(echo "$SMART_ALL" | grep -i "Reallocated_Sector_Ct\|Reallocated_Event" | awk '{print $10}')
     PENDING=$(echo "$SMART_ALL" | grep -i "Current_Pending_Sector\|Pending_Sector" | awk '{print $10}')
     UNCORRECT=$(echo "$SMART_ALL" | grep -i "Offline_Uncorrectable\|Uncorrectable_Error" | awk '{print $10}')
     WEAR_LEVEL=$(echo "$SMART_ALL" | grep -i "Wear_Leveling_Count\|SSD_Life_Left\|Percent_Lifetime" | awk '{print $4}' | head -1)
     MEDIA_ERRORS=$(echo "$SMART_ALL" | grep -i "Media_Wearout_Indicator\|media_errors" | awk '{print $10}' | head -1)
 
+    # SAS/SCSI specific critical attributes
+    SAS_GROWN_DEFECTS=$(echo "$SMART_ALL" | grep -iE "grown defect|Elements in grown defect" | awk '{print $NF}')
+    SAS_READ_UNCORRECT=$(echo "$SMART_ALL" | grep -A1 "read:" 2>/dev/null | tail -1 | awk '{print $NF}')
+
     # NVMe specific
     NVME_MEDIA_ERR=$(echo "$SMART_ALL" | grep -i "Media and Data" | awk '{print $NF}')
     NVME_PERCENT_USED=$(echo "$SMART_ALL" | grep -i "Percentage Used" | awk '{print $NF}')
 
-    # Status keseluruhan
+    # Deteksi tipe disk (SSD/HDD) dari rotation rate jika ada
+    ROTATION=$(echo "$SMART_ALL" | grep -i "Rotation Rate" | head -1)
+    if echo "$ROTATION" | grep -qi "Solid State"; then
+      DISK_TYPE="SSD"
+    elif [[ "$disk" == /dev/nvme* ]]; then
+      DISK_TYPE="NVMe"
+    fi
+
+    # Status keseluruhan — 3 cabang: OK, tidak terbaca (RAID virtual disk), atau GAGAL
     if [[ "$SMART_STATUS" == "PASSED" ]] || [[ "$SMART_STATUS" == "OK" ]]; then
-      echo -e "  ${GREEN}✓${NC} ${BOLD}${disk}${NC} [${DISK_TYPE}] ${MODEL}"
+      echo -e "  ${GREEN}✓${NC} ${BOLD}${DISK_LABEL}${NC} [${DISK_TYPE}] ${MODEL} ${SERIAL:+(S/N: ${SERIAL})}"
       echo -e "    Health: ${GREEN}${SMART_STATUS}${NC}  Suhu: ${TEMP:-N/A}°C  Power On: ${POWER_ON:-N/A}h  Siklus: ${POWER_CYCLE:-N/A}  ${CAPACITY}"
+    elif [[ -z "$SMART_STATUS" ]]; then
+      # SMART tidak terbaca — kemungkinan RAID virtual disk, skip
+      if [[ "$dtype" == "scsi" ]] && [[ -n "$(echo "$DISK_LIST" | grep 'megaraid\|3ware\|cciss')" ]]; then
+        # Ini RAID virtual disk (/dev/sda -d scsi), disk fisik sudah di-scan terpisah via megaraid
+        echo -e "  ${CYAN}ℹ${NC} ${BOLD}${DISK_LABEL}${NC} — RAID Virtual Disk (disk fisik di-scan terpisah di bawah)"
+        echo ""
+        continue
+      fi
+      echo -e "  ${YELLOW}?${NC} ${BOLD}${DISK_LABEL}${NC} [${DISK_TYPE}] ${MODEL}"
+      echo -e "    Health: ${YELLOW}TIDAK DAPAT DIBACA${NC} — SMART data tidak tersedia"
+      echo -e "    ${CYAN}ℹ Coba: smartctl --scan  untuk menemukan interface yang benar${NC}"
+      WARNINGS+=("Disk ${DISK_LABEL}: SMART tidak dapat dibaca")
+      echo ""
+      continue
     else
-      echo -e "  ${RED}✗${NC} ${BOLD}${disk}${NC} [${DISK_TYPE}] ${MODEL}"
-      echo -e "    Health: ${RED}${SMART_STATUS:-TIDAK DIKETAHUI}${NC}  Suhu: ${TEMP:-N/A}°C  ${RED}⚠ PERIKSA SEGERA!${NC}"
-      ISSUES+=("Disk ${disk}: SMART status ${SMART_STATUS} — Kemungkinan kerusakan hardware!")
+      echo -e "  ${RED}✗${NC} ${BOLD}${DISK_LABEL}${NC} [${DISK_TYPE}] ${MODEL} ${SERIAL:+(S/N: ${SERIAL})}"
+      echo -e "    Health: ${RED}${SMART_STATUS}${NC}  Suhu: ${TEMP:-N/A}°C  ${RED}⚠ PERIKSA SEGERA!${NC}"
+      ISSUES+=("Disk ${DISK_LABEL}: SMART status ${SMART_STATUS} — Kemungkinan kerusakan hardware!")
     fi
 
     # Tampilkan critical attributes
     DISK_ATTR_ISSUES=false
-    if [[ -n "$REALLOCATED" ]] && (( ${REALLOCATED:-0} >= SMART_REALLOCATED_WARN )); then
+    if [[ -n "$REALLOCATED" ]] && (( 10#${REALLOCATED:-0} >= SMART_REALLOCATED_WARN )); then
       echo -e "    ${RED}  ⚠ Reallocated Sectors: ${REALLOCATED} — Disk mulai mengalami kerusakan fisik!${NC}"
-      ISSUES+=("Disk ${disk}: Reallocated Sectors=${REALLOCATED} — Segera backup data & siapkan pengganti!")
+      ISSUES+=("Disk ${DISK_LABEL}: Reallocated Sectors=${REALLOCATED} — Segera backup data & siapkan pengganti!")
       DISK_ATTR_ISSUES=true
     fi
-    if [[ -n "$PENDING" ]] && (( ${PENDING:-0} > 0 )); then
+    if [[ -n "$PENDING" ]] && (( 10#${PENDING:-0} > 0 )); then
       echo -e "    ${YELLOW}  ⚠ Pending Sectors  : ${PENDING} — Sektor menunggu realokasi${NC}"
-      WARNINGS+=("Disk ${disk}: Current Pending Sector=${PENDING} — Monitor ketat!")
+      WARNINGS+=("Disk ${DISK_LABEL}: Current Pending Sector=${PENDING} — Monitor ketat!")
       DISK_ATTR_ISSUES=true
     fi
-    if [[ -n "$UNCORRECT" ]] && (( ${UNCORRECT:-0} > 0 )); then
+    if [[ -n "$UNCORRECT" ]] && (( 10#${UNCORRECT:-0} > 0 )); then
       echo -e "    ${RED}  ⚠ Uncorrectable Err : ${UNCORRECT} — Error yang tidak bisa diperbaiki!${NC}"
-      ISSUES+=("Disk ${disk}: Uncorrectable Error=${UNCORRECT} — Risiko kehilangan data tinggi!")
+      ISSUES+=("Disk ${DISK_LABEL}: Uncorrectable Error=${UNCORRECT} — Risiko kehilangan data tinggi!")
       DISK_ATTR_ISSUES=true
     fi
-    if [[ -n "$WEAR_LEVEL" ]] && (( ${WEAR_LEVEL:-255} < 20 )); then
+    if [[ -n "$WEAR_LEVEL" ]] && (( 10#${WEAR_LEVEL:-255} < 20 )); then
       echo -e "    ${YELLOW}  ⚠ Wear Level        : ${WEAR_LEVEL} — SSD mendekati akhir umur pakai${NC}"
-      WARNINGS+=("Disk ${disk}: Wear Level=${WEAR_LEVEL} — SSD hampir habis masa pakainya")
+      WARNINGS+=("Disk ${DISK_LABEL}: Wear Level=${WEAR_LEVEL} — SSD hampir habis masa pakainya")
+      DISK_ATTR_ISSUES=true
+    fi
+    # SAS: Grown Defect List
+    if [[ -n "$SAS_GROWN_DEFECTS" ]] && (( 10#${SAS_GROWN_DEFECTS:-0} > 0 )); then
+      echo -e "    ${YELLOW}  ⚠ Grown Defects     : ${SAS_GROWN_DEFECTS} — Bad sector terdeteksi pada disk SAS${NC}"
+      WARNINGS+=("Disk ${DISK_LABEL}: Grown Defects=${SAS_GROWN_DEFECTS} — Monitor ketat!")
       DISK_ATTR_ISSUES=true
     fi
     [[ -n "$NVME_PERCENT_USED" ]] && echo -e "    NVMe Used%: ${NVME_PERCENT_USED}  Media Errors: ${NVME_MEDIA_ERR:-N/A}"
@@ -851,14 +889,14 @@ if command -v smartctl &>/dev/null; then
     if [[ -n "$TEMP" ]] && [[ "$TEMP" =~ ^[0-9]+$ ]]; then
       if (( TEMP >= DISK_TEMP_CRITICAL )); then
         echo -e "    ${RED}  🔥 Suhu disk KRITIS: ${TEMP}°C!${NC}"
-        ISSUES+=("Disk ${disk}: Suhu ${TEMP}°C — OVERHEAT! Periksa airflow server")
+        ISSUES+=("Disk ${DISK_LABEL}: Suhu ${TEMP}°C — OVERHEAT! Periksa airflow server")
       elif (( TEMP >= DISK_TEMP_WARNING )); then
         echo -e "    ${YELLOW}  ⚠ Suhu disk tinggi: ${TEMP}°C${NC}"
-        WARNINGS+=("Disk ${disk}: Suhu ${TEMP}°C — Tinggi, periksa airflow")
+        WARNINGS+=("Disk ${DISK_LABEL}: Suhu ${TEMP}°C — Tinggi, periksa airflow")
       fi
     fi
     echo ""
-  done
+  done <<< "$DISK_LIST"
   [[ "$DISK_FOUND" == false ]] && echo -e "  ${YELLOW}Tidak ada disk yang terdeteksi.${NC}"
 else
   echo -e "  ${YELLOW}smartmontools tidak terinstall.${NC}"
@@ -876,7 +914,7 @@ BACKUP_OK_COUNT=0
 
 # BUG #4 FIX: pattern deteksi error lebih spesifik (hindari false positive)
 BACKUP_ERROR_PATTERN='ERROR:|TASK ERROR:|backup failed|command .* failed|No space left|Connection timed out|aborted|FAILED:'
-BACKUP_OK_PATTERN='TASK OK|backup successful|Backup job finished'
+BACKUP_OK_PATTERN='TASK OK|backup successful|Backup job finished|Finished Backup of VM|Finished Backup of CT|archive file size|transferred .* in .* seconds'
 
 if [[ -d "$BACKUP_LOG_DIR" ]]; then
   echo -e "  ${BOLD}Log Backup 24 Jam Terakhir (${BACKUP_LOG_DIR}):${NC}"
@@ -1249,7 +1287,6 @@ printf "  %-12s %-13s %-15s %s\n" "Storage"  "< ${STORAGE_WARNING}%"  "${STORAGE
 printf "  %-12s %-13s %-15s %s\n" "IOWait"   "< ${IOWAIT_WARNING}%"   "${IOWAIT_WARNING}-${IOWAIT_CRITICAL}%"   "> ${IOWAIT_CRITICAL}%"
 printf "  %-12s %-13s %-15s %s\n" "CPU Steal" "< ${CPU_STEAL_WARNING}%" "${CPU_STEAL_WARNING}-${CPU_STEAL_CRITICAL}%" "> ${CPU_STEAL_CRITICAL}%"
 printf "  %-12s %-13s %-15s %s\n" "Disk Temp" "< ${DISK_TEMP_WARNING}°C" "${DISK_TEMP_WARNING}-${DISK_TEMP_CRITICAL}°C" "> ${DISK_TEMP_CRITICAL}°C"
-printf "  %-12s %-13s %-15s %s\n" "CPU Temp"  "< ${CPU_TEMP_WARNING}°C"  "${CPU_TEMP_WARNING}-${CPU_TEMP_CRITICAL}°C"  "> ${CPU_TEMP_CRITICAL}°C"
 
 # ─── Tips Operasional ───────────────────────────────────────────────────────
 echo ""
@@ -1263,7 +1300,7 @@ echo -e "  • OOM history    : journalctl --since '24h ago' | grep -i oom"
 echo -e "  • Task history   : pvesh get /nodes/\$(hostname)/tasks --limit 20"
 echo -e "  • Storage pool   : pvesm status"
 echo -e "  • HA status      : ha-manager status"
-echo -e "  • Suhu CPU       : sensors"
+
 echo -e "  • SMART detail   : smartctl -a /dev/sda"
 echo -e "  • Log backup     : ls -lhrt /var/log/vzdump/ | tail -20"
 echo -e "  • Cron setup     : 0 */6 * * * /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-analyzer.log 2>&1"

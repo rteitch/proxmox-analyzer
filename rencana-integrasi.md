@@ -3,8 +3,9 @@
 
 ## 🔗 Blueprint Integrasi: proxmox-analyzer.sh + n8n + Telegram/WhatsApp
 
-> Script v4.0 **tidak diubah** — ini rancangan untuk pengembangan berikutnya
+> Script v4.2 **sudah stabil** — ini rancangan untuk pengembangan berikutnya
 > **Update v4.1**: Fitur `NODE_LABEL` sudah tersedia untuk identifikasi multi-node
+> **Update v4.2**: SMART auto-detection RAID controller, perbaikan backup & format output
 
 ---
 
@@ -178,17 +179,33 @@ return $input.all();
 ### Roadmap Pengembangan
 
 ```
-v4.0 (Selesai)      →  v4.1 (Selesai)            →  v5.0 (Rencana)
-Script enterprise        + --name / NODE_LABEL          Tambah --json flag
-Enterprise monitoring    + Identitas multi-node         + Integrasi penuh n8n
-                         + Header lebih informatif      + Dashboard Grafana
+v4.0 (Selesai)      →  v4.1 (Selesai)            →  v4.2 (Selesai)               →  v5.0 (Rencana)
+Script enterprise        + --name / NODE_LABEL          + SMART auto-detect RAID          Tambah --json flag
+Enterprise monitoring    + Identitas multi-node         + Fix backup detection            + Integrasi penuh n8n
+                         + Header lebih informatif      + Fix printf/format output        + Dashboard Grafana
+                                                        + SAS/SSD attributes
 ```
 
 **Status Saat Ini:**
 - [x] v4.0 — Script monitoring enterprise
 - [x] v4.1 — NODE_LABEL untuk multi-node (`--name="PVE-xxx"`)
+- [x] v4.2 — SMART auto-detection RAID + bug fixes
 - [ ] v4.5 — Wrapper + Integrasi n8n (Webhook / SSH)
 - [ ] v5.0 — Flag `--json` output terstruktur
+
+**Changelog v4.2:**
+
+| Kategori | Perubahan |
+|----------|----------|
+| **SMART** | Auto-detect disk via `smartctl --scan` (MegaRAID, 3ware, cciss, SAS, NVMe) |
+| **SMART** | RAID virtual disk ditandai sebagai ℹ info, bukan ❌ kritis |
+| **SMART** | Tambah Serial Number, SAS Grown Defects, SSD auto-detection |
+| **SMART** | Fix parsing health status multi-line (`PASSED\ncheck.`) |
+| **SMART** | Fix octal error pada attribute value berawalan 0 (contoh: `099`) |
+| **SMART** | Fix parsing suhu untuk format SATA/SAS/NVMe yang berbeda |
+| **Backup** | Expanded OK pattern: `Finished Backup of VM`, `archive file size` |
+| **VM/CT** | Fix `%-10s` format string pada status VM/Container |
+| **Network** | Fix `%8d` format string pada kolom RX/TX Error |
 
 **Pilihan WhatsApp Provider:**
 

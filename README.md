@@ -1,4 +1,4 @@
-# 📋 Panduan Lengkap: proxmox-analyzer.sh v4.0
+# 📋 Panduan Lengkap: proxmox-analyzer.sh v4.2
 **Proxmox Resource Analyzer — Enterprise Edition**
 
 > Script monitoring kesehatan server Proxmox VE yang komprehensif, 100% **read-only**, aman dijalankan di lingkungan produksi.
@@ -35,7 +35,7 @@
 | **Storage** | Filesystem, Proxmox storage pool, ZFS pool, LVM |
 | **Network** | Traffic, error packet, throughput realtime per interface |
 | **VM dan Container** | Status + resource usage aktual per VM/LXC |
-| **Disk Health** | S.M.A.R.T status, suhu, Reallocated Sectors, Wear Level |
+| **Disk Health** | S.M.A.R.T auto-detection (SATA, SAS, NVMe, MegaRAID, 3ware, cciss) |
 | **Backup Status** | Log vzdump 24 jam, deteksi job yang gagal |
 | **Cluster dan HA** | Status quorum, node online/offline, HA manager |
 | **Kernel Events** | Error dmesg, OOM Kill events (24 jam) |
@@ -346,6 +346,25 @@ Menampilkan semua VM dan Container beserta:
 
 ### Bagian 7 — Disk Health SMART
 
+**Auto-Detection via `smartctl --scan`:**
+
+Script secara otomatis mendeteksi semua jenis disk, termasuk yang berada di belakang RAID controller:
+
+| Tipe Hardware | Contoh Device | Deteksi |
+|---|---|---|
+| SATA HDD/SSD langsung | `/dev/sda` | ✅ Otomatis |
+| NVMe SSD | `/dev/nvme0n1` | ✅ Otomatis |
+| MegaRAID (Dell PERC, LSI/Broadcom) | `/dev/bus/0 -d megaraid,N` | ✅ Otomatis |
+| 3ware RAID | `/dev/twaN -d 3ware,N` | ✅ Otomatis |
+| HP SmartArray (cciss) | `/dev/sgN -d cciss,N` | ✅ Otomatis |
+| Areca RAID | `/dev/sgN -d areca,N` | ✅ Otomatis |
+| SAS via HBA | `/dev/sda -d scsi` | ✅ Otomatis |
+
+**RAID Virtual Disk:**
+Jika terdeteksi RAID controller dengan disk fisik di belakangnya, script otomatis:
+- Menandai RAID virtual disk (`/dev/sda`) sebagai ℹ informasi
+- Scan setiap disk fisik secara terpisah via passthrough (megaraid, dll)
+
 **Critical Attributes yang Dipantau:**
 
 | Attribute | Nilai Berbahaya | Artinya |
@@ -354,6 +373,7 @@ Menampilkan semua VM dan Container beserta:
 | Current Pending Sectors | > 0 | Sektor menunggu realokasi |
 | Uncorrectable Errors | > 0 | Error tidak bisa diperbaiki. Risiko data loss tinggi! |
 | Wear Leveling Count | < 20 | SSD hampir habis masa pakainya |
+| Grown Defect List (SAS) | > 0 | Bad sector terdeteksi pada disk SAS |
 | NVMe Percentage Used | > 80% | SSD NVMe mendekati akhir umurnya |
 
 **Tentang Disk Sleep (ikon 💤):**
@@ -365,6 +385,7 @@ Script menggunakan `--nocheck=standby` sehingga HDD yang sedang sleep tidak akan
 
 - Membaca log dari `/var/log/vzdump/` untuk backup 24 jam terakhir
 - Jika direktori tidak ada, fallback ke Proxmox Task API
+- Deteksi sukses: `TASK OK`, `Finished Backup of VM`, `archive file size`, `transferred ... in ... seconds`
 - Pola error yang terdeteksi: `No space left`, `Connection timed out`, `backup failed`, `aborted`
 
 ---
@@ -556,14 +577,26 @@ apt install -y bc
 
 ---
 
-### SMART menampilkan "Timeout"
+### SMART menampilkan "Timeout" atau "Tidak bisa dibaca"
 
-**Penyebab**: Disk bermasalah atau sangat sibuk, tidak merespons dalam 15 detik.
+**Penyebab**: Disk bermasalah, sangat sibuk, atau di belakang RAID controller.
 
 ```bash
-# Cek manual
+# Scan semua disk (termasuk RAID)
+smartctl --scan
+
+# Cek manual disk langsung
 smartctl -a /dev/sda
+
+# Cek disk di belakang MegaRAID (Dell PERC, LSI)
+smartctl -a /dev/bus/0 -d megaraid,0
+smartctl -a /dev/bus/0 -d megaraid,1
+
+# Cek disk via SAT translation
+smartctl -a /dev/sda -d sat
 ```
+
+> Script v4.2 sudah otomatis mendeteksi RAID controller via `smartctl --scan`. Jika disk tetap tidak terbaca, pastikan `smartmontools` versi terbaru terinstall.
 
 ---
 
@@ -637,7 +670,8 @@ Script akan otomatis fallback ke tampilan raw output. Tidak masalah.
 
 | Kondisi | Waktu Estimasi |
 |---------|---------------|
-| Semua tools lengkap (dengan iostat) | 8–12 detik |
+| Semua tools lengkap (tanpa RAID) | 8–12 detik |
+| Dengan RAID controller (6 disk) | 15–25 detik |
 | Tanpa iostat (fallback vmstat) | 4–6 detik |
 | Per disk tambahan (SMART) | +2–5 detik per disk |
 | Per node cluster (ping) | +1–2 detik per node |
@@ -663,5 +697,5 @@ sensors                                    → Hardware sensors
 
 ---
 
-*Panduan untuk proxmox-analyzer.sh v4.0 Enterprise Edition*
-*Terakhir diperbarui: 2026-04-20 — Tambah fitur NODE_LABEL untuk identifikasi multi-node*
+*Panduan untuk proxmox-analyzer.sh v4.2 Enterprise Edition*
+*Terakhir diperbarui: 2026-04-20 — SMART auto-detection RAID controller, perbaikan backup detection, fix format output*
