@@ -6,6 +6,7 @@
 > Script v4.2 **sudah stabil** — ini rancangan untuk pengembangan berikutnya
 > **Update v4.1**: Fitur `NODE_LABEL` sudah tersedia untuk identifikasi multi-node
 > **Update v4.2**: SMART auto-detection RAID controller, perbaikan backup & format output
+> **Hotfix Terkini**: `--alert-only` mematikan semua output log (*mute stdout*) sehingga *payload* data ke webhook n8n 100% murni tanpa *spam*.
 
 ---
 
@@ -206,6 +207,8 @@ Enterprise monitoring    + Identitas multi-node         + Fix backup detection  
 | **Backup** | Expanded OK pattern: `Finished Backup of VM`, `archive file size` |
 | **VM/CT** | Fix `%-10s` format string pada status VM/Container |
 | **Network** | Fix `%8d` format string pada kolom RX/TX Error |
+| **System** | **HOTFIX**: Fitur `--alert-only` menggunakan teknik *file descriptor redirection* (`exec 3>&1 >/dev/null`) untuk menyembunyikan log analisis dan log normal yang tidak relevan. |
+| **Tampilan** | **HOTFIX**: Pembersihan kalimat *spammy* "Nama pembeda antar Proxmox" pada Header. |
 
 **Pilihan WhatsApp Provider:**
 

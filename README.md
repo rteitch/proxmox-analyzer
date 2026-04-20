@@ -132,13 +132,13 @@ Menampilkan seluruh 13 bagian monitoring secara lengkap. Cocok untuk pemeriksaan
 
 ---
 
-### Mode 2 — Hanya Tampilkan Masalah
+### Mode 2 — Hanya Tampilkan Masalah (Mode Senyap)
 
 ```bash
 bash /root/scripts/proxmox-analyzer.sh --alert-only
 ```
 
-Hanya menampilkan bagian yang memiliki status PERINGATAN atau KRITIS, plus summary akhir. Cocok untuk pemeriksaan cepat atau cronjob.
+Melakukan analisis *secara diam-diam* di latar belakang dan **hanya mencetak bagian Summary di akhir** jika terdapat peringatan (WARNING) atau masalah kritis. Status normal, tabel threshold, dan *log output* lainnya akan otomatis disembunyikan. Sangat cocok untuk *cronjob* atau *webhook* n8n/Telegram karena menghemat kuota teks HTTP POST.
 
 ---
 
@@ -697,5 +697,5 @@ sensors                                    → Hardware sensors
 
 ---
 
-*Panduan untuk proxmox-analyzer.sh v4.2 Enterprise Edition*
-*Terakhir diperbarui: 2026-04-20 — SMART auto-detection RAID controller, perbaikan backup detection, fix format output*
+*Panduan untuk proxmox-analyzer.sh v4.2+ Enterprise Edition*
+*Terakhir diperbarui: 2026-04-20 — Pembersihan *Header*, perbaikan fitur mute output `--alert-only`, SMART auto-detection RAID controller, dan perbaikan deteksi log backup.*

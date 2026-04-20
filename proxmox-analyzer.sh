@@ -208,7 +208,7 @@ UPTIME_STR=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F
 [[ -z "$NODE_LABEL" ]] && NODE_LABEL="$HOSTNAME_FULL"
 
 print_header "PROXMOX ANALYZER v4.0 — ${NODE_LABEL}"
-echo -e "  ${BOLD}Node Label     :${NC} ${MAGENTA}${BOLD}${NODE_LABEL}${NC}  ${CYAN}← Nama pembeda antar Proxmox${NC}"
+echo -e "  ${BOLD}Node Label     :${NC} ${MAGENTA}${BOLD}${NODE_LABEL}${NC}"
 echo -e "  ${BOLD}Hostname       :${NC} ${HOSTNAME_FULL}"
 echo -e "  ${BOLD}Waktu Analisis :${NC} ${TIMESTAMP}"
 echo -e "  ${BOLD}Versi PVE      :${NC} ${PVE_VERSION}"
