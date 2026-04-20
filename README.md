@@ -11,12 +11,13 @@
 2. [Persyaratan Dependensi](#2-persyaratan-dependensi)
 3. [Instalasi](#3-instalasi)
 4. [Cara Penggunaan](#4-cara-penggunaan)
-5. [Penjelasan Setiap Bagian Output](#5-penjelasan-setiap-bagian-output)
-6. [Konfigurasi Threshold](#6-konfigurasi-threshold)
-7. [Setup Cronjob Otomatis](#7-setup-cronjob-otomatis)
-8. [Membaca Hasil Summary](#8-membaca-hasil-summary)
-9. [FAQ dan Troubleshooting](#9-faq-dan-troubleshooting)
-10. [Catatan Keamanan dan Performa](#10-catatan-keamanan-dan-performa)
+5. [Multi-Node: Membedakan Banyak Proxmox](#5-multi-node-membedakan-banyak-proxmox)
+6. [Penjelasan Setiap Bagian Output](#6-penjelasan-setiap-bagian-output)
+7. [Konfigurasi Threshold](#7-konfigurasi-threshold)
+8. [Setup Cronjob Otomatis](#8-setup-cronjob-otomatis)
+9. [Membaca Hasil Summary](#9-membaca-hasil-summary)
+10. [FAQ dan Troubleshooting](#10-faq-dan-troubleshooting)
+11. [Catatan Keamanan dan Performa](#11-catatan-keamanan-dan-performa)
 
 ---
 
@@ -156,11 +157,21 @@ bash /root/scripts/proxmox-analyzer.sh --no-color > /tmp/hasil-analisis.txt
 
 ---
 
+### Mode 4 — Beri Nama Kustom Node (Multi-Node)
+
+```bash
+bash /root/scripts/proxmox-analyzer.sh --name="PVE-Utama"
+```
+
+Menambahkan label identitas kustom pada output header. Berguna saat Anda mengelola banyak server Proxmox. Lihat [Bagian 5](#5-multi-node-membedakan-banyak-proxmox) untuk panduan lengkap.
+
+---
+
 ### Kombinasi Flag
 
 ```bash
-# Alert only + tanpa warna (sempurna untuk cronjob)
-bash /root/scripts/proxmox-analyzer.sh --alert-only --no-color
+# Alert only + tanpa warna + nama node (sempurna untuk cronjob multi-node)
+bash /root/scripts/proxmox-analyzer.sh --alert-only --no-color --name="PVE-Utama"
 ```
 
 ---
@@ -182,7 +193,69 @@ fi
 
 ---
 
-## 5. Penjelasan Setiap Bagian Output
+## 5. Multi-Node: Membedakan Banyak Proxmox
+
+Jika Anda memiliki lebih dari satu server Proxmox, gunakan fitur **`NODE_LABEL`** untuk memberi nama kustom pada setiap node. Label ini akan muncul di:
+- Header output terminal
+- File log (mudah di-grep)
+- Payload notifikasi Telegram/WhatsApp via n8n
+
+### Cara Set NODE_LABEL
+
+| Metode | Contoh | Keterangan |
+|--------|--------|------------|
+| **Argument `--name`** | `bash proxmox-analyzer.sh --name="PVE-Utama"` | Paling praktis |
+| **Environment variable** | `NODE_LABEL="PVE-Backup" bash proxmox-analyzer.sh` | Cocok untuk wrapper script |
+| **Default (otomatis)** | Tidak di-set | Fallback ke `hostname -f` |
+
+### Contoh Output Header
+
+```
+╔════════════════════════════════════════════════════════════╗
+║  PROXMOX ANALYZER v4.0 — PVE-Datacenter-JKT               ║
+╚════════════════════════════════════════════════════════════╝
+  Node Label     : PVE-Datacenter-JKT  ← Nama pembeda antar Proxmox
+  Hostname       : pve01.datacenter.local
+  Waktu Analisis : 2026-04-20 14:30:00
+  ...
+```
+
+### Setup Cronjob untuk Multi-Node
+
+Setiap node Proxmox punya cronjob-nya sendiri dengan nama yang berbeda:
+
+```bash
+# ── Di PVE Node 1 (Datacenter Jakarta) ──
+crontab -e
+# Tambahkan:
+0 */6 * * * bash /root/scripts/proxmox-analyzer.sh --no-color --name="PVE-JKT-01" >> /var/log/pve-analyzer.log 2>&1
+
+# ── Di PVE Node 2 (Datacenter Bandung) ──
+crontab -e
+# Tambahkan:
+0 */6 * * * bash /root/scripts/proxmox-analyzer.sh --no-color --name="PVE-BDG-Backup" >> /var/log/pve-analyzer.log 2>&1
+
+# ── Di PVE Node 3 (Development) ──
+crontab -e
+# Tambahkan:
+0 */6 * * * bash /root/scripts/proxmox-analyzer.sh --no-color --name="PVE-DEV" >> /var/log/pve-analyzer.log 2>&1
+```
+
+### Grep Log per Node
+
+```bash
+# Filter log hanya dari node tertentu
+grep "PVE-JKT-01" /var/log/pve-analyzer.log
+
+# Lihat semua KRITIS dari semua node
+grep "KRITIS" /var/log/pve-analyzer.log
+```
+
+> **Tip Penamaan**: Gunakan format yang konsisten, misalnya `LOKASI-FUNGSI-NOMOR` → `JKT-PROD-01`, `BDG-BACKUP-01`, `DEV-TEST-01`. Ini memudahkan filter dan notifikasi di n8n.
+
+---
+
+## 6. Penjelasan Setiap Bagian Output
 
 ### Bagian 1 — CPU Analysis
 
@@ -340,7 +413,7 @@ Layanan Proxmox yang dipantau:
 
 ---
 
-## 6. Konfigurasi Threshold
+## 7. Konfigurasi Threshold
 
 Edit baris 54–73 di script untuk menyesuaikan ambang batas:
 
@@ -377,7 +450,7 @@ IOWAIT_CRITICAL=60
 
 ---
 
-## 7. Setup Cronjob Otomatis
+## 8. Setup Cronjob Otomatis
 
 ### Buka Crontab
 
@@ -388,17 +461,20 @@ crontab -e
 ### Pilihan Jadwal
 
 ```bash
-# Setiap 6 jam (direkomendasikan)
-0 */6 * * * /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-analyzer.log 2>&1
+# Setiap 6 jam — single node (direkomendasikan)
+0 */6 * * * bash /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-analyzer.log 2>&1
+
+# Setiap 6 jam — multi-node (dengan nama kustom)
+0 */6 * * * bash /root/scripts/proxmox-analyzer.sh --no-color --name="PVE-Utama" >> /var/log/pve-analyzer.log 2>&1
 
 # Setiap 1 jam (monitoring ketat)
-0 * * * * /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-analyzer.log 2>&1
+0 * * * * bash /root/scripts/proxmox-analyzer.sh --no-color --name="PVE-Utama" >> /var/log/pve-analyzer.log 2>&1
 
 # Hanya alert, setiap 30 menit
-*/30 * * * * /root/scripts/proxmox-analyzer.sh --alert-only --no-color >> /var/log/pve-alerts.log 2>&1
+*/30 * * * * bash /root/scripts/proxmox-analyzer.sh --alert-only --no-color --name="PVE-Utama" >> /var/log/pve-alerts.log 2>&1
 
 # Laporan harian jam 07:00
-0 7 * * * /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-daily.log 2>&1
+0 7 * * * bash /root/scripts/proxmox-analyzer.sh --no-color --name="PVE-Utama" >> /var/log/pve-daily.log 2>&1
 ```
 
 ### Manajemen Log (Agar Log Tidak Terlalu Besar)
@@ -430,7 +506,7 @@ grep "$(date '+%Y-%m-%d')" /var/log/pve-analyzer.log
 
 ---
 
-## 8. Membaca Hasil Summary
+## 9. Membaca Hasil Summary
 
 ### Label Status
 
@@ -468,7 +544,7 @@ Baca file log backup yang gagal untuk cari tahu penyebabnya (storage penuh, kone
 
 ---
 
-## 9. FAQ dan Troubleshooting
+## 10. FAQ dan Troubleshooting
 
 ### Semua persentase menunjukkan 0%
 
@@ -545,7 +621,7 @@ Script akan otomatis fallback ke tampilan raw output. Tidak masalah.
 
 ---
 
-## 10. Catatan Keamanan dan Performa
+## 11. Catatan Keamanan dan Performa
 
 ### Jaminan Keamanan
 
@@ -588,4 +664,4 @@ sensors                                    → Hardware sensors
 ---
 
 *Panduan untuk proxmox-analyzer.sh v4.0 Enterprise Edition*
-*Terakhir diperbarui: 2026-04-20*
+*Terakhir diperbarui: 2026-04-20 — Tambah fitur NODE_LABEL untuk identifikasi multi-node*

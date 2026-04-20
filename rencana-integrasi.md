@@ -4,6 +4,7 @@
 ## 🔗 Blueprint Integrasi: proxmox-analyzer.sh + n8n + Telegram/WhatsApp
 
 > Script v4.0 **tidak diubah** — ini rancangan untuk pengembangan berikutnya
+> **Update v4.1**: Fitur `NODE_LABEL` sudah tersedia untuk identifikasi multi-node
 
 ---
 
@@ -66,8 +67,10 @@ Buat file baru `/root/scripts/run-analyzer.sh` — script utama tidak diubah:
 ```bash
 #!/bin/bash
 # Wrapper — proxmox-analyzer.sh tidak diubah sama sekali
+# Set NODE_LABEL di sini sesuai nama node ini
+NODE_LABEL="PVE-JKT-01"   # ← GANTI sesuai nama node
 
-OUTPUT=$(bash /root/scripts/proxmox-analyzer.sh --alert-only --no-color)
+OUTPUT=$(bash /root/scripts/proxmox-analyzer.sh --alert-only --no-color --name="$NODE_LABEL")
 EXIT_CODE=$?
 
 if [[ $EXIT_CODE -gt 0 ]]; then
@@ -78,6 +81,7 @@ if [[ $EXIT_CODE -gt 0 ]]; then
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer YOUR_SECRET" \
     -d "{
+      \"node_label\": \"${NODE_LABEL}\",
       \"host\": \"$(hostname)\",
       \"timestamp\": \"$(date '+%Y-%m-%d %H:%M:%S')\",
       \"exit_code\": ${EXIT_CODE},
@@ -108,7 +112,10 @@ Output:
 
 ```json
 {
-  "host": "pve01", "exit_code": 2, "status": "KRITIS",
+  "node_label": "PVE-JKT-01",
+  "host": "pve01",
+  "exit_code": 2,
+  "status": "KRITIS",
   "issues": ["Backup gagal!", "Disk /dev/sda rusak!"],
   "warnings": ["RAM 85%", "IOWait 22%"],
   "metrics": {"cpu": 42.5, "ram": 85.2, "iowait": 22.1}
@@ -146,13 +153,14 @@ return $input.all();
 
 ---
 
-### Contoh Pesan Telegram Final
+### Contoh Pesan Telegram Final (Multi-Node)
 
 ```
 🔴 PROXMOX ALERT — KRITIS
 
-🖥️ Host: pve01
-🕐 Waktu: 20/04/2026 11:30:00
+🖥️ Node   : PVE-JKT-01
+💻 Host   : pve01.datacenter.local
+🕐 Waktu  : 20/04/2026 11:30:00
 
 ❌ MASALAH:
 • Backup: 1 job GAGAL!
@@ -162,7 +170,7 @@ return $input.all();
 • RAM 85% — Tinggi
 • IOWait 22% — Mulai tinggi
 
-💡 ssh root@pve01 untuk cek langsung
+💡 ssh root@pve01.datacenter.local untuk cek langsung
 ```
 
 ---
@@ -170,11 +178,17 @@ return $input.all();
 ### Roadmap Pengembangan
 
 ```
-v4.0 (Sekarang)     →  v4.5 (Fase 1)           →  v5.0 (Fase 2)
-Script sudah ada        Buat wrapper.sh              Tambah --json flag
-                        + n8n via SSH/Webhook        + Integrasi penuh
-                        + Alert Telegram             + Dashboard Grafana
+v4.0 (Selesai)      →  v4.1 (Selesai)            →  v5.0 (Rencana)
+Script enterprise        + --name / NODE_LABEL          Tambah --json flag
+Enterprise monitoring    + Identitas multi-node         + Integrasi penuh n8n
+                         + Header lebih informatif      + Dashboard Grafana
 ```
+
+**Status Saat Ini:**
+- [x] v4.0 — Script monitoring enterprise
+- [x] v4.1 — NODE_LABEL untuk multi-node (`--name="PVE-xxx"`)
+- [ ] v4.5 — Wrapper + Integrasi n8n (Webhook / SSH)
+- [ ] v5.0 — Flag `--json` output terstruktur
 
 **Pilihan WhatsApp Provider:**
 
