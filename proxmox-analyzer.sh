@@ -4,9 +4,11 @@
 # Analisis komprehensif CPU, RAM, Storage, Network, VM/CT, Backup, Cluster
 #
 # Penggunaan:
-#   bash proxmox-analyzer.sh              → Tampilkan semua info
-#   bash proxmox-analyzer.sh --alert-only → Hanya tampilkan masalah/peringatan
-#   bash proxmox-analyzer.sh --no-color   → Output tanpa warna (untuk log file)
+#   bash proxmox-analyzer.sh                      → Tampilkan semua info
+#   bash proxmox-analyzer.sh --alert-only          → Hanya tampilkan masalah/peringatan
+#   bash proxmox-analyzer.sh --no-color            → Output tanpa warna (untuk log file)
+#   bash proxmox-analyzer.sh --name="PVE-Utama"   → Beri nama kustom node ini
+#   NODE_LABEL="PVE-Backup" bash proxmox-analyzer.sh → Nama via environment variable
 #
 # Deploy & Jalankan Otomatis via Cronjob:
 #   chmod +x proxmox-analyzer.sh
@@ -83,10 +85,12 @@ SMART_REALLOCATED_WARN=1 # Reallocated Sectors > 0 sudah warning
 ALERT_ONLY=false
 NO_COLOR=false
 FORCE_COLOR=false
+NODE_LABEL="${NODE_LABEL:-}"   # Bisa di-set via env: NODE_LABEL="PVE-Utama" bash proxmox-analyzer.sh
 for arg in "$@"; do
   [[ "$arg" == "--alert-only" ]] && ALERT_ONLY=true
   [[ "$arg" == "--no-color"   ]] && NO_COLOR=true
   [[ "$arg" == "--color"      ]] && FORCE_COLOR=true
+  [[ "$arg" == --name=* ]]       && NODE_LABEL="${arg#--name=}"
 done
 
 setup_colors
@@ -191,7 +195,12 @@ PVE_VERSION=$(pveversion 2>/dev/null | head -1 || echo 'N/A')
 KERNEL_VER=$(uname -r)
 UPTIME_STR=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F', load' '{print $1}')
 
-print_header "PROXMOX ANALYZER v4.0 — ${HOSTNAME_FULL}"
+# Jika NODE_LABEL tidak di-set, fallback ke hostname
+[[ -z "$NODE_LABEL" ]] && NODE_LABEL="$HOSTNAME_FULL"
+
+print_header "PROXMOX ANALYZER v4.0 — ${NODE_LABEL}"
+echo -e "  ${BOLD}Node Label     :${NC} ${MAGENTA}${BOLD}${NODE_LABEL}${NC}  ${CYAN}← Nama pembeda antar Proxmox${NC}"
+echo -e "  ${BOLD}Hostname       :${NC} ${HOSTNAME_FULL}"
 echo -e "  ${BOLD}Waktu Analisis :${NC} ${TIMESTAMP}"
 echo -e "  ${BOLD}Versi PVE      :${NC} ${PVE_VERSION}"
 echo -e "  ${BOLD}Kernel         :${NC} ${KERNEL_VER}"
