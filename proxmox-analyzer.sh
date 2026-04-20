@@ -234,6 +234,10 @@ OK_LIST=()
 # =============================================================================
 # BAGIAN 1: CPU ANALYSIS
 # =============================================================================
+if [[ "$ALERT_ONLY" == true ]]; then
+  exec 3>&1 >/dev/null
+fi
+
 print_section "CPU ANALYSIS"
 
 CPU_COUNT=$(nproc)
@@ -1240,6 +1244,10 @@ done
 # =============================================================================
 # BAGIAN 13: SUMMARY & REKOMENDASI
 # =============================================================================
+if [[ "$ALERT_ONLY" == true ]]; then
+  exec 1>&3 3>&-
+fi
+
 print_header "SUMMARY ANALISIS & REKOMENDASI"
 
 # ─── Cetak Masalah Kritis ────────────────────────────────────────────────────
@@ -1259,7 +1267,7 @@ if [[ ${#WARNINGS[@]} -gt 0 ]]; then
 fi
 
 # ─── Cetak Normal ────────────────────────────────────────────────────────────
-if [[ ${#OK_LIST[@]} -gt 0 ]]; then
+if [[ ${#OK_LIST[@]} -gt 0 ]] && [[ "$ALERT_ONLY" == false ]]; then
   echo -e "\n  ${GREEN}${BOLD}✓ STATUS NORMAL (${#OK_LIST[@]}):${NC}"
   for ok in "${OK_LIST[@]}"; do
     echo -e "  ${GREEN}  • ${ok}${NC}"
@@ -1277,6 +1285,7 @@ else
 fi
 
 # ─── Panduan Threshold ───────────────────────────────────────────────────────
+if [[ "$ALERT_ONLY" == false ]]; then
 echo ""
 echo -e "  ${BOLD}📋 Threshold Aktif:${NC}"
 printf "  %-12s Normal       Peringatan     Kritis\n" "Metrik"
@@ -1304,6 +1313,7 @@ echo -e "  • HA status      : ha-manager status"
 echo -e "  • SMART detail   : smartctl -a /dev/sda"
 echo -e "  • Log backup     : ls -lhrt /var/log/vzdump/ | tail -20"
 echo -e "  • Cron setup     : 0 */6 * * * /root/scripts/proxmox-analyzer.sh --no-color >> /var/log/pve-analyzer.log 2>&1"
+fi
 
 echo -e "\n${BLUE}${BOLD}$(printf '═%.0s' {1..68})${NC}"
 printf "${BLUE}${BOLD}  Selesai: %-30s Host: %-20s${NC}\n" "$(date '+%Y-%m-%d %H:%M:%S')" "${HOSTNAME_FULL}"
