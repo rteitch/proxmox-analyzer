@@ -1065,7 +1065,7 @@ else
 fi
 
 # =============================================================================
-# BAGIAN 11: PROXMOX TASK HISTORY — NEW v4.0
+# BAGIAN 11: PROXMOX TASK HISTORY (24 Jam)
 # =============================================================================
 print_section "PROXMOX TASK HISTORY (24 Jam)"
 
@@ -1075,14 +1075,18 @@ if command -v pvesh &>/dev/null; then
     --limit 50 --output-format json 2>/dev/null)
 
   if [[ -n "$TASK_OUTPUT" ]] && echo "$TASK_OUTPUT" | python3 -m json.tool &>/dev/null 2>&1; then
-    # Parse JSON dengan python3
+
+    # [FIX] Simpan JSON ke Environment Variable agar aman dibaca oleh Python
+    export TASK_JSON="$TASK_OUTPUT"
+
+    # 1. Parse Task Gagal
     echo -e "\n  ${BOLD}Task Gagal / Error (24 jam):${NC}"
-    TASK_FAIL_COUNT=0
     python3 - <<'PYEOF' 2>/dev/null
-import json, sys, time
+import json, sys, time, os
 
 try:
-    data = json.loads(open('/dev/stdin').read())
+    # Membaca data dari Environment Variable
+    data = json.loads(os.environ.get('TASK_JSON', '[]'))
 except:
     sys.exit(0)
 
@@ -1100,17 +1104,18 @@ else:
     for t in failed[:15]:
         ts = time.strftime('%Y-%m-%d %H:%M', time.localtime(t.get('starttime', 0)))
         print(f"  \033[0;31m✗\033[0m [{ts}] {t.get('type','?'):12s} {t.get('id','?'):20s} → {t.get('status','?')}")
-PYEOF <<< "$TASK_OUTPUT"
+PYEOF
 
-    # Task sukses
+    # 2. Parse Task Terbaru
     echo -e "\n  ${BOLD}Task Terbaru (semua tipe):${NC}"
     printf "  %-18s %-14s %-22s %s\n" "Waktu" "Tipe" "ID/VMID" "Status"
     echo -e "  $(printf '─%.0s' {1..66})"
+
     python3 - <<'PYEOF' 2>/dev/null
-import json, sys, time
+import json, sys, time, os
 
 try:
-    data = json.loads(open('/dev/stdin').read())
+    data = json.loads(os.environ.get('TASK_JSON', '[]'))
 except:
     sys.exit(0)
 
@@ -1130,10 +1135,14 @@ for t in recent[:20]:
     else:
         sc = '\033[0;31m'
     print(f"  [{ts}] {t.get('type','?'):13s} {t.get('id','?'):22s} {sc}{status}\033[0m")
-PYEOF <<< "$TASK_OUTPUT"
+PYEOF
+
+    # Bersihkan environment variable
+    unset TASK_JSON
+
   else
-    # Fallback: tampilkan raw jika python3 tidak ada
-    echo -e "  ${YELLOW}python3 tidak tersedia untuk parse JSON. Output raw:${NC}"
+    # Fallback jika Python tidak ada atau API error
+    echo -e "  ${YELLOW}Data API kosong atau python3 gagal mem-parsing. Output raw:${NC}"
     safe_run 15 pvesh get /nodes/"${HOSTNAME_SHORT}"/tasks --limit 10 2>/dev/null | \
       grep -E "type|status|starttime" | head -30 | sed 's/^/  /'
   fi
